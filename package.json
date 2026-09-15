@@ -1,0 +1,22 @@
+{
+  "name": "academics-system",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Jericho School Management System — monorepo (apps/api + apps/frontend)",
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
+  },
+  "scripts": {
+    "dev": "npm --prefix apps/frontend run dev",
+    "start:dev": "npm --prefix apps/api run start:dev",
+    "build": "npm --prefix apps/frontend run build",
+    "build:frontend": "npm --prefix apps/frontend run build",
+    "build:api": "npm --prefix apps/api run build",
+    "dev:frontend": "npm --prefix apps/frontend run dev",
+    "dev:api": "npm --prefix apps/api run start:dev"
+  },
+  "devDependencies": {
+    "playwright": "^1.62.1"
+  }
+}

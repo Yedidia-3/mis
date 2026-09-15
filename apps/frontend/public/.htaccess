@@ -1,0 +1,10 @@
+# SPA routing for react-router on Apache/cPanel.
+# Lives in apps/frontend/public/ so Vite copies it into every build (dist/.htaccess),
+# which means it deploys automatically with the site — no manual server edits.
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteCond %{REQUEST_FILENAME} -f [OR]
+  RewriteCond %{REQUEST_FILENAME} -d
+  RewriteRule ^ - [L]
+  RewriteRule ^ index.html [L]
+</IfModule>

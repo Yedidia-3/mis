@@ -1,0 +1,60 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: jericho_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: jericho_school
+      POSTGRES_USER: jericho
+      POSTGRES_PASSWORD: secret
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - jericho_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U jericho -d jericho_school"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: ../../apps/api
+      dockerfile: Dockerfile
+    container_name: jericho_api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USERNAME: jericho
+      DB_PASSWORD: secret
+      DB_NAME: jericho_school
+      JWT_SECRET: change_this_in_production
+      JWT_EXPIRES_IN: 2h
+      # Must match where Vite actually serves the frontend, or the browser
+      # blocks every request and the login screen reports "Failed to fetch".
+      FRONTEND_URL: http://localhost:5173,http://127.0.0.1:5173
+      # Create the schema on first boot. Migrations are the only supported way;
+      # never set SYNCHRONIZE_DB against a database holding real records.
+      RUN_MIGRATIONS: "true"
+    ports:
+      - "3001:3001"
+    networks:
+      - jericho_network
+
+  # The frontend is not containerised — run it with `npm --prefix apps/frontend
+  # run dev`, which proxies to the API on port 3001.
+
+volumes:
+  postgres_data:
+
+networks:
+  jericho_network:
+    driver: bridge

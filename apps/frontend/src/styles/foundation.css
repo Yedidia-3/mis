@@ -1,0 +1,424 @@
+/*
+ * Design foundation.
+ *
+ * The palette already lives in theme.css. This adds the layer above it: how
+ * type is sized and tracked, how things move, how surfaces are made, and how
+ * all of that bends to the accessibility settings a user has already chosen.
+ *
+ * Screens should reference these tokens rather than literal values, so a
+ * change here reaches every screen at once.
+ */
+
+:root {
+  /* ── Supporting palette ──────────────────────────────────────────────────
+   * Shades the screens reach for that the base palette doesn't name. Defined
+   * here so no literal colour is left stranded in a component.
+   */
+  --navy-light: #002a7a;      /* gradient partner for --navy-blue */
+  --maroon-dark: #a3082a;     /* pressed/hover state for --maroon */
+  --gold-ink: #8a6d1f;        /* gold dark enough to read as text */
+  --neutral-ink: #6b6b6b;     /* muted text that still meets contrast */
+
+  /* ── Type ────────────────────────────────────────────────────────────────
+   * Tracking is size-specific. Letterforms drift apart as they grow, so large
+   * text is tightened and small text is opened up slightly; a single
+   * letter-spacing value is always wrong at one end of the scale.
+   * Leading moves inversely to size — tight on headings, generous on body.
+   */
+  --text-display: 2rem;
+  --tracking-display: -0.022em;
+  --leading-display: 1.1;
+
+  --text-title: 1.5rem;
+  --tracking-title: -0.018em;
+  --leading-title: 1.2;
+
+  --text-heading: 1.125rem;
+  --tracking-heading: -0.011em;
+  --leading-heading: 1.3;
+
+  --text-body: 1rem;
+  --tracking-body: 0;
+  --leading-body: 1.5;
+
+  --text-secondary: 0.875rem;
+  --tracking-secondary: 0.002em;
+  --leading-secondary: 1.45;
+
+  --text-caption: 0.75rem;
+  --tracking-caption: 0.01em;
+  --leading-caption: 1.4;
+
+  /* ── Motion ──────────────────────────────────────────────────────────────
+   * Two behaviours, not a pile of durations.
+   *
+   * `settle` is critically damped — it arrives and stops, no overshoot. It is
+   * the default, because overshoot on something that merely appeared reads as
+   * fidgety.
+   *
+   * `spring` carries a little bounce, and is reserved for motion that follows
+   * a gesture the user themselves put momentum into.
+   *
+   * `press` is deliberately near-instant: feedback the user should perceive as
+   * simultaneous with their finger, not as an animation.
+   */
+  --ease-settle: cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-spring: cubic-bezier(0.34, 1.42, 0.64, 1);
+  --ease-exit: cubic-bezier(0.4, 0, 1, 1);
+
+  --duration-press: 80ms;
+  --duration-settle: 360ms;
+  --duration-transition: 280ms;
+
+  /* Reversible transitions mirror their easing, so the return path retraces
+     the outbound one rather than taking a different route back. */
+  --ease-in-out-mirror: cubic-bezier(0.5, 0, 0.5, 1);
+
+  /* ── Materials ───────────────────────────────────────────────────────────
+   * Translucent layers that float above content rather than opaque bars that
+   * consume a strip of the screen. Larger surfaces read as thicker: more blur,
+   * deeper shadow.
+   */
+  --material-thin-bg: rgba(255, 255, 255, 0.72);
+  --material-thin-blur: blur(16px) saturate(180%);
+
+  --material-thick-bg: rgba(255, 255, 255, 0.85);
+  --material-thick-blur: blur(24px) saturate(190%);
+
+  /* Sidebar is navy, so its material is built from the sidebar colour. */
+  --material-sidebar-bg: rgba(0, 31, 91, 0.88);
+  --material-sidebar-blur: blur(28px) saturate(160%);
+
+  /* A bright top edge reads as light catching the leading edge of glass. */
+  --material-edge: rgba(255, 255, 255, 0.45);
+
+  --scrim: rgba(15, 18, 26, 0.38);
+
+  /* ── Elevation ───────────────────────────────────────────────────────────
+   * Bigger surfaces sit higher and cast more shadow.
+   */
+  --elevation-rest: 0 1px 3px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.02);
+  --elevation-raised: 0 4px 14px rgba(0, 0, 0, 0.07), 0 1px 3px rgba(0, 0, 0, 0.03);
+  --elevation-floating: 0 12px 32px rgba(0, 0, 0, 0.10), 0 2px 6px rgba(0, 0, 0, 0.04);
+  --elevation-modal: 0 24px 64px rgba(0, 0, 0, 0.22), 0 6px 20px rgba(0, 0, 0, 0.08);
+}
+
+/* ── Type utilities ────────────────────────────────────────────────────────
+ * Hierarchy is built from size, weight and leading as a set — not size alone.
+ */
+.type-display {
+  font-size: var(--text-display);
+  line-height: var(--leading-display);
+  letter-spacing: var(--tracking-display);
+  font-weight: 700;
+}
+.type-title {
+  font-size: var(--text-title);
+  line-height: var(--leading-title);
+  letter-spacing: var(--tracking-title);
+  font-weight: 600;
+}
+.type-heading {
+  font-size: var(--text-heading);
+  line-height: var(--leading-heading);
+  letter-spacing: var(--tracking-heading);
+  font-weight: 600;
+}
+.type-body {
+  font-size: var(--text-body);
+  line-height: var(--leading-body);
+  letter-spacing: var(--tracking-body);
+}
+.type-secondary {
+  font-size: var(--text-secondary);
+  line-height: var(--leading-secondary);
+  letter-spacing: var(--tracking-secondary);
+}
+.type-caption {
+  font-size: var(--text-caption);
+  line-height: var(--leading-caption);
+  letter-spacing: var(--tracking-caption);
+}
+
+/* Headings carry negative tracking by default — they are large by definition. */
+h1 { letter-spacing: var(--tracking-display); line-height: var(--leading-display); }
+h2 { letter-spacing: var(--tracking-title);   line-height: var(--leading-title); }
+h3 { letter-spacing: var(--tracking-heading); line-height: var(--leading-heading); }
+
+/* ── Materials ─────────────────────────────────────────────────────────────*/
+.material-thin {
+  background: var(--material-thin-bg);
+  backdrop-filter: var(--material-thin-blur);
+  -webkit-backdrop-filter: var(--material-thin-blur);
+}
+.material-thick {
+  background: var(--material-thick-bg);
+  backdrop-filter: var(--material-thick-blur);
+  -webkit-backdrop-filter: var(--material-thick-blur);
+  border-bottom: 1px solid var(--material-edge);
+}
+.material-sidebar {
+  background: var(--material-sidebar-bg);
+  backdrop-filter: var(--material-sidebar-blur);
+  -webkit-backdrop-filter: var(--material-sidebar-blur);
+}
+
+/* Where floating chrome overlaps content, fade the meeting point instead of
+   drawing a hard 1px rule across it. */
+.scroll-edge-top {
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 12px);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 12px);
+}
+
+/* ── Press feedback ────────────────────────────────────────────────────────
+ * Feedback belongs on the press, not the release. The transition is short
+ * enough to read as simultaneous with the finger.
+ */
+.press {
+  /* Named properties rather than `all`: transitioning everything drags layout
+     properties into the animation and costs frames. */
+  transition: transform var(--duration-press) var(--ease-settle),
+              opacity var(--duration-press) var(--ease-settle),
+              background-color var(--duration-press) var(--ease-settle),
+              border-color var(--duration-press) var(--ease-settle),
+              box-shadow var(--duration-press) var(--ease-settle);
+  -webkit-tap-highlight-color: transparent;
+}
+.press:active {
+  transform: scale(0.97);
+}
+.press-subtle:active {
+  transform: scale(0.99);
+}
+
+/* Rows are wide; scaling them looks wrong, so they respond with tone instead. */
+.press-row {
+  transition: background-color var(--duration-press) var(--ease-settle);
+}
+.press-row:active {
+  background-color: rgba(0, 31, 91, 0.06);
+}
+
+/* ── Entrances ─────────────────────────────────────────────────────────────
+ * Surfaces materialise — blur and scale resolving together — rather than
+ * fading in flat, so glass reads as a material arriving.
+ */
+@keyframes materialize {
+  from { opacity: 0; transform: scale(0.97) translateY(6px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+.materialize {
+  animation: materialize var(--duration-settle) var(--ease-settle) both;
+}
+
+/* ── Drawer ────────────────────────────────────────────────────────────────
+ * Slides in from the left edge it is anchored to, over a scrim that fades in
+ * with it. Both use the settle curve, so the panel arrives and stops rather
+ * than bouncing — nothing was thrown, so nothing should overshoot.
+ */
+@keyframes drawer-in {
+  from { transform: translateX(-100%); }
+  to   { transform: translateX(0); }
+}
+@keyframes scrim-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.drawer-panel {
+  animation: drawer-in var(--duration-transition) var(--ease-settle) both;
+  will-change: transform;
+}
+.drawer-scrim {
+  background: var(--scrim);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  animation: scrim-in var(--duration-transition) var(--ease-settle) both;
+}
+
+/* ── Surfaces ──────────────────────────────────────────────────────────────*/
+.card-surface {
+  box-shadow: var(--elevation-rest);
+}
+
+.interactive-card {
+  transition: transform var(--duration-transition) var(--ease-settle),
+              box-shadow var(--duration-transition) var(--ease-settle),
+              border-color var(--duration-transition) var(--ease-settle);
+  will-change: transform;
+}
+.interactive-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--elevation-raised);
+}
+.interactive-card:active {
+  transform: translateY(0) scale(0.985);
+  transition-duration: var(--duration-press);
+}
+
+.glass-panel {
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  box-shadow: var(--elevation-raised);
+}
+
+/* ── Tabular Numerals ──────────────────────────────────────────────────────
+ * Aligns numbers cleanly in tables, badges, metrics, and timestamps.
+ */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Segmented Controls ────────────────────────────────────────────────────
+ * iOS/macOS-style physical segmented control track and active pill.
+ */
+.segmented-control {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.05);
+  border: 1px solid rgba(0, 0, 0, 0.04);
+  backdrop-filter: blur(8px);
+}
+.segmented-item {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 14px;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  border-radius: 9px;
+  transition: all var(--duration-transition) var(--ease-settle);
+  color: var(--neutral-ink);
+  background: transparent;
+  outline: none;
+  cursor: pointer;
+}
+.segmented-item:active {
+  transform: scale(0.97);
+  transition-duration: var(--duration-press);
+}
+.segmented-item-active {
+  background: #ffffff;
+  color: var(--dark-gray);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.04);
+  font-weight: 600;
+}
+
+/* ── Apple Soft Vibrancy Badges ────────────────────────────────────────────*/
+.badge-soft-success {
+  background-color: rgba(26, 127, 75, 0.10);
+  color: #13663b;
+  border: 1px solid rgba(26, 127, 75, 0.22);
+}
+.badge-soft-warning {
+  background-color: rgba(217, 119, 6, 0.10);
+  color: #b45309;
+  border: 1px solid rgba(217, 119, 6, 0.22);
+}
+.badge-soft-danger {
+  background-color: rgba(192, 57, 43, 0.10);
+  color: #a93226;
+  border: 1px solid rgba(192, 57, 43, 0.22);
+}
+.badge-soft-info {
+  background-color: rgba(37, 99, 235, 0.10);
+  color: #1d4ed8;
+  border: 1px solid rgba(37, 99, 235, 0.22);
+}
+.badge-soft-neutral {
+  background-color: rgba(107, 107, 107, 0.08);
+  color: #4a4a4a;
+  border: 1px solid rgba(107, 107, 107, 0.18);
+}
+
+/* ── Apple Scrollbar ───────────────────────────────────────────────────────*/
+.apple-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.apple-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.apple-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.14);
+  border-radius: 9999px;
+}
+.apple-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.28);
+}
+
+/* ── Dialogs ───────────────────────────────────────────────────────────────*/
+.dialog-scrim {
+  background: var(--scrim);
+  backdrop-filter: blur(8px) saturate(160%);
+  -webkit-backdrop-filter: blur(8px) saturate(160%);
+  animation-duration: var(--duration-transition);
+  animation-timing-function: var(--ease-settle);
+}
+.dialog-panel {
+  box-shadow: var(--elevation-modal);
+  animation-duration: var(--duration-transition);
+  animation-timing-function: var(--ease-settle);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  will-change: transform, opacity;
+}
+
+/* ── Accessibility ─────────────────────────────────────────────────────────
+ * Three independent signals, each honoured on its own terms.
+ */
+
+/* Reduced motion is not "no feedback" — it is feedback without vestibular
+   movement. Opacity and colour still carry meaning, so they stay. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .press:active,
+  .press-subtle:active {
+    transform: none;
+    opacity: 0.85;
+  }
+  .materialize {
+    animation: none;
+    opacity: 1;
+  }
+}
+
+/* Frostier and more solid, rather than simply removing the layer — the
+   hierarchy the material conveys still needs to survive. */
+@media (prefers-reduced-transparency: reduce) {
+  :root {
+    --material-thin-bg: rgba(255, 255, 255, 0.98);
+    --material-thick-bg: rgba(255, 255, 255, 1);
+    --material-sidebar-bg: #001F5B;
+  }
+  .material-thin,
+  .material-thick,
+  .material-sidebar {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+
+@media (prefers-contrast: more) {
+  :root {
+    --border: #6b6b6b;
+    --muted-foreground: #55555b;
+    --material-thin-bg: #ffffff;
+    --material-thick-bg: #ffffff;
+  }
+  .material-thin,
+  .material-thick {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    border: 1px solid var(--border);
+  }
+}

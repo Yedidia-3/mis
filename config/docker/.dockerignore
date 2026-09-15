@@ -1,0 +1,36 @@
+# Frontend source — not needed in the API image
+src/
+public/
+index.html
+vite.config.ts
+tailwind.config.*
+postcss.config.*
+tsconfig.json
+tsconfig.app.json
+tsconfig.node.json
+
+# Root-level package files (frontend)
+package.json
+package-lock.json
+pnpm-lock.yaml
+
+# Node modules (rebuilt inside image)
+**/node_modules
+
+# Build artifacts
+**/dist
+**/.turbo
+**/.next
+
+# Dev / CI config
+.git
+.gitignore
+.github
+docker/
+docker-compose.yml
+*.md
+
+# Env files
+.env
+.env.*
+!.env.example
