@@ -1,17 +1,18 @@
-import { defineConfig } from 'vite'
-import tailwindcss from '@tailwindcss/vite'
-import react from '@vitejs/plugin-react'
+import { defineConfig } from 'vite';
+import tailwindcss from '@tailwindcss/vite';
+import react from '@vitejs/plugin-react';
+import path from 'path';
 
 function figmaAssetResolver() {
   return {
     name: 'figma-asset-resolver',
     resolveId(id: string) {
       if (id.startsWith('figma:asset/')) {
-        const filename = id.replace('figma:asset/', '')
-        return new URL(`./src/assets/${filename}`, import.meta.url).pathname
+        const filename = id.replace('figma:asset/', '');
+        return path.resolve(__dirname, `./src/assets/${filename}`);
       }
     },
-  }
+  };
 }
 
 export default defineConfig({
@@ -20,10 +21,11 @@ export default defineConfig({
     react(),
     tailwindcss(),
   ],
+  base: '/',
   resolve: {
     alias: {
-      '@': new URL('./src', import.meta.url).pathname,
+      '@': path.resolve(__dirname, './src'),
     },
   },
   assetsInclude: ['**/*.svg', '**/*.csv'],
-})
+});
