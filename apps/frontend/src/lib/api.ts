@@ -1,14 +1,21 @@
+// Sanitize raw environment variable
 const envBase = import.meta.env.VITE_API_URL?.trim();
-export const BASE_URL = envBase || (import.meta.env.DEV ? 'http://127.0.0.1:3001' : undefined);
 
-if (!BASE_URL) {
-  throw new Error('VITE_API_URL must be set in production builds. Set it in Vercel / deployment environment variables.');
-}
+// Direct Railway fallback for production to guarantee app stability
+const productionFallback = 'https://mis-misapi.up.railway.app/api/v1';
+
+// Format base URL by stripping trailing slashes
+const rawBase = envBase || (import.meta.env.DEV ? 'http://127.0.0.1:3001' : productionFallback);
+export const BASE_URL = rawBase.replace(/\/+$/, '');
 
 async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = localStorage.getItem('token');
 
-  const res = await fetch(`${BASE_URL}${path}`, {
+  // Sanitize route path to ensure it starts with a single '/'
+  const cleanPath = path.startsWith('/') ? path : `/${path}`;
+  const fullUrl = `${BASE_URL}${cleanPath}`;
+
+  const res = await fetch(fullUrl, {
     ...options,
     headers: {
       'Content-Type': 'application/json',
@@ -38,8 +45,8 @@ async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> 
 }
 
 export const api = {
-  get:    <T>(path: string)                  => apiFetch<T>(path, { method: 'GET' }),
-  post:   <T>(path: string, body: unknown)   => apiFetch<T>(path, { method: 'POST',   body: JSON.stringify(body) }),
-  put:    <T>(path: string, body: unknown)   => apiFetch<T>(path, { method: 'PUT',    body: JSON.stringify(body) }),
-  delete: <T>(path: string)                  => apiFetch<T>(path, { method: 'DELETE' }),
+  get:    <T>(path: string)                => apiFetch<T>(path, { method: 'GET' }),
+  post:   <T>(path: string, body: unknown) => apiFetch<T>(path, { method: 'POST',   body: JSON.stringify(body) }),
+  put:    <T>(path: string, body: unknown) => apiFetch<T>(path, { method: 'PUT',    body: JSON.stringify(body) }),
+  delete: <T>(path: string)                => apiFetch<T>(path, { method: 'DELETE' }),
 };
