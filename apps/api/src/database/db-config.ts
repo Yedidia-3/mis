@@ -17,15 +17,17 @@ type HostConnection = {
   username: string;
   password: string;
   database: string;
+  ssl?: { rejectUnauthorized: boolean } | boolean;
 };
 
 export type DbConnection = UrlConnection | HostConnection;
 
 export function buildDbConnection(env: NodeJS.ProcessEnv = process.env): DbConnection {
+  const isProduction = env.NODE_ENV === 'production';
   const databaseUrl = (env.DATABASE_URL ?? env.RAILWAY_DATABASE_URL)?.trim();
+
   if (databaseUrl) {
-    // Managed Postgres terminates TLS with a cert we don't pin, so verification
-    // is off. The connection is still encrypted.
+    // Managed Postgres on Railway requires SSL
     return { url: databaseUrl, ssl: { rejectUnauthorized: false } };
   }
 
@@ -35,16 +37,12 @@ export function buildDbConnection(env: NodeJS.ProcessEnv = process.env): DbConne
     username: env.PGUSER || env.DB_USERNAME || 'postgres',
     password: env.PGPASSWORD || env.DB_PASSWORD || '',
     database: env.PGDATABASE || env.DB_NAME || 'jericho_school',
+    ssl: isProduction ? { rejectUnauthorized: false } : false,
   };
 }
 
 /**
  * Schema auto-sync. Explicit opt-in only.
- *
- * TypeORM's `synchronize` alters and drops columns to match the entities. That
- * is fine against a throwaway dev database and unacceptable against the
- * school's live one, so it is never enabled by inference — set SYNCHRONIZE_DB
- * to "true" deliberately, or leave it off and use migrations.
  */
 export function shouldSynchronize(env: NodeJS.ProcessEnv = process.env): boolean {
   return env.SYNCHRONIZE_DB === 'true';
