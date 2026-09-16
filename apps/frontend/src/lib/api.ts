@@ -1,17 +1,17 @@
-// Sanitize raw environment variable
 const envBase = import.meta.env.VITE_API_URL?.trim();
 
-// Direct Railway fallback for production to guarantee app stability
+// Hardcoded production fallback to guarantee network routing to Railway
 const productionFallback = 'https://mis-misapi.up.railway.app/api/v1';
 
-// Format base URL by stripping trailing slashes
 const rawBase = envBase || (import.meta.env.DEV ? 'http://127.0.0.1:3001' : productionFallback);
+
+// Remove trailing slashes from the base URL
 export const BASE_URL = rawBase.replace(/\/+$/, '');
 
 async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = localStorage.getItem('token');
 
-  // Sanitize route path to ensure it starts with a single '/'
+  // Sanitize path to ensure exact slash formatting
   const cleanPath = path.startsWith('/') ? path : `/${path}`;
   const fullUrl = `${BASE_URL}${cleanPath}`;
 
@@ -25,22 +25,16 @@ async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> 
   });
 
   if (!res.ok) {
-    // Only force a redirect when an EXISTING session expired (a token was sent).
-    // A 401 from the login attempt itself (no token yet) must NOT reload the
-    // page — let the LoginScreen show an inline error instead.
     if (res.status === 401 && token) {
       localStorage.removeItem('token');
       localStorage.removeItem('user');
       window.location.href = '/login';
     }
     const err = await res.json().catch(() => ({}));
-    // Unwrap error from NestJS interceptor envelope { success, data, message }
     throw new Error(err?.message ?? err?.data?.message ?? `Request failed: ${res.status}`);
   }
 
   const json = await res.json();
-  // NestJS ResponseInterceptor wraps every response as { success, data, message }.
-  // Unwrap transparently so callers get the raw payload.
   return (json?.data !== undefined ? json.data : json) as T;
 }
 
