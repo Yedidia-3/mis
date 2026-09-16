@@ -63,9 +63,5 @@
   },
   "allowScripts": {
     "bcrypt@5.1.1": true
-  },
-"scripts": {
-  "build": "nest build",
-  "start": "npm run migration:run && node dist/main",
-  "start:prod": "npm run migration:run && node dist/main"
+  }
 }
