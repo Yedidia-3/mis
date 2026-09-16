@@ -28,7 +28,7 @@ apps/
     src/
       entities/        TypeORM entities + the shared entity registry (index.ts)
       migrations/      Schema history — the only supported way to change the DB
-      academics/       Academic year, P-levels, classes, shuffle, timetable
+      academics/       Academic year, P-levels, classes, shuffle
       accountant/      Feeding & transport enrolments, payments, zones
       admin/           User management
       auth/            Login, JWT, password policy
@@ -36,7 +36,6 @@ apps/
       notifications/   WebSocket notifications
       database/        Seed, admin recovery, shared DB config
   frontend/            React + Vite client (38 screens)
-config/docker/         docker-compose for a local Postgres + API
 docs/sample-data/      Example student import spreadsheets (P1–P6)
 ```
 
@@ -47,7 +46,7 @@ Five roles, defined on the user entity and enforced by guards on every route:
 | Role | Does what |
 | --- | --- |
 | `super_admin` | Creates and manages all other users. The only seeded account. |
-| `dean` | Runs the class shuffle, imports students, builds timetables |
+| `dean` | Runs the class shuffle and imports students |
 | `principal` | Reviews and approves proposed shuffles |
 | `teacher` | Records attendance for their own classes |
 | `accountant` | Feeding and transport enrolments, payment tracking, zones |
@@ -120,12 +119,6 @@ appropriate sub-package with `--prefix`. No need to `cd` into either folder.
 > `apps/api/.env` lists the address Vite is actually serving on — port `5173`,
 > not `3000`.
 
-### Local Postgres via Docker (optional)
-
-```bash
-docker compose -f config/docker/docker-compose.yml up -d postgres
-```
-
 ---
 
 ## Build
@@ -168,8 +161,8 @@ npm test
 ```
 
 Covers the two places where a silent bug does real damage — the shuffle
-algorithms (a child in the wrong class) and the timetable solver (a teacher
-double-booked). CI runs these on every push and pull request.
+algorithms (a child in the wrong class) and grade calculations. CI runs these
+on every push and pull request.
 
 ## Deployment
 
@@ -211,7 +204,7 @@ All Vercel configuration lives in [`vercel.json`](vercel.json) at the repo root 
 **Environment variables** required in the Vercel project settings:
 
 ```
-VITE_API_BASE_URL=https://api.jerichoschool.ac.rw/api/v1
+VITE_API_URL=https://api.jerichoschool.ac.rw
 ```
 
 ### Backend → Railway

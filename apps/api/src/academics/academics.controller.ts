@@ -1,5 +1,5 @@
 import {
-    BadRequestException, Body, Controller, Delete, Get, NotFoundException, Param, Post, Put,
+    BadRequestException, Body, Controller, Delete, Get, Param, Post, Put,
     Query, Res, UploadedFile, UseGuards, UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
@@ -90,23 +90,34 @@ export class AcademicsController {
   // Students
   @Get('classes/:id/students')
   @Roles('dean', 'principal', 'teacher', 'accountant')
-  getStudents(@Param('id') id: string) {
-    return this.academicsService.getClassStudents(+id);
+  getStudents(@Param('id') id: string, @CurrentUser() user: User) {
+    return this.academicsService.getClassStudentsForUser(+id, user);
   }
 
   @Post('classes/:id/students')
-  @Roles('dean', 'accountant')
-  addStudents(@Param('id') id: string, @Body('students') students: { name: string }[]) {
-    return this.academicsService.addStudentsToClass(+id, students ?? []);
+  @Roles('dean', 'accountant', 'teacher')
+  addStudents(
+    @Param('id') id: string,
+    @Body('students') students: { name: string }[],
+    @CurrentUser() user: User,
+  ) {
+    return this.academicsService.addStudentsToClassForUser(+id, students ?? [], user);
   }
 
   @Put('students/:id')
-  @Roles('dean', 'accountant')
+  @Roles('dean', 'accountant', 'teacher')
   updateStudent(
     @Param('id') id: string,
     @Body() body: { name?: string; former_class?: string; rank?: number | string; marks_percentage?: number | string },
+    @CurrentUser() user: User,
   ) {
-    return this.academicsService.updateStudent(+id, body ?? {});
+    return this.academicsService.updateStudentForUser(+id, body ?? {}, user);
+  }
+
+  @Delete('students/:id')
+  @Roles('dean', 'accountant', 'teacher')
+  removeStudentFromClass(@Param('id') id: string, @CurrentUser() user: User) {
+    return this.academicsService.removeStudentFromClassForUser(+id, user);
   }
 
   @Put('students/:id/move')
@@ -128,44 +139,6 @@ export class AcademicsController {
     return this.academicsService.importExcel(+id, +yearId, file.buffer);
   }
 
-  // Timetable upload (Excel workbook with many sheets). Each sheet represents
-  // a class or view; the server parses sheets into canonical JSON slots and
-  // stores them for later viewing/export.
-  @Post('timetable/upload')
-  @Roles('dean')
-  @UseInterceptors(FileInterceptor('file', { storage: memoryStorage() }))
-  async uploadTimetable(
-    @Query('academic_year_id') yearId: string,
-    @UploadedFile() file: Express.Multer.File,
-    @CurrentUser() user: User,
-  ) {
-    throw new NotFoundException('Timetable feature has been removed');
-  }
-
-  @Get('timetable')
-  @Roles('dean', 'principal', 'teacher')
-  listTimetables(@Query('academic_year_id') yearId: string) {
-    throw new NotFoundException('Timetable feature has been removed');
-  }
-
-  @Get('timetable/:id')
-  @Roles('dean', 'principal', 'teacher')
-  getTimetable(@Param('id') id: string) {
-    throw new NotFoundException('Timetable feature has been removed');
-  }
-
-  @Get('timetable/teacher/:teacherId')
-  @Roles('teacher')
-  getTeacherTimetable(@Param('teacherId') teacherId: string) {
-    throw new NotFoundException('Timetable feature has been removed');
-  }
-
-  @Get('timetable/:id/export')
-  @Roles('dean', 'principal')
-  async exportTimetable(@Param('id') id: string, @Res() res: Response) {
-    throw new NotFoundException('Timetable feature has been removed');
-  }
-
   // Teacher portal
   @Get('teacher/classes')
   @Roles('teacher')
@@ -182,9 +155,9 @@ export class AcademicsController {
   // Attendance
   @Get('classes/:id/attendance')
   @Roles('teacher', 'dean', 'principal')
-  getAttendance(@Param('id') id: string, @Query('date') date: string) {
+  getAttendance(@Param('id') id: string, @Query('date') date: string, @CurrentUser() user: User) {
     const day = date || new Date().toISOString().split('T')[0];
-    return this.academicsService.getClassAttendance(+id, day);
+    return this.academicsService.getClassAttendanceForUser(+id, day, user);
   }
 
   @Post('classes/:id/attendance')
@@ -195,7 +168,7 @@ export class AcademicsController {
     @Body('records') records: { student_id: number; status: 'present' | 'absent' | 'late' }[],
     @CurrentUser() user: User,
   ) {
-    return this.academicsService.saveClassAttendance(+id, date, records, user.id);
+    return this.academicsService.saveClassAttendanceForUser(+id, date, records, user);
   }
 
   @Post('classes/:id/attendance/reset')
@@ -205,7 +178,7 @@ export class AcademicsController {
     @Body('date') date: string,
     @CurrentUser() user: User,
   ) {
-    return this.academicsService.resetClassAttendance(+id, date, user.id);
+    return this.academicsService.resetClassAttendanceForUser(+id, date, user);
   }
 
   @Get('teacher/attendance-history')
@@ -228,12 +201,13 @@ export class AcademicsController {
     @Param('id') id: string,
     @Query('format') format: string,
     @Res() res: Response,
+    @CurrentUser() user: User,
   ) {
     if (format !== 'xlsx' && format !== 'docx') {
       throw new BadRequestException('format must be xlsx or docx');
     }
-    const classInfo = await this.academicsService.getClassWithPLevel(+id);
-    const students = await this.academicsService.getClassStudents(+id);
+    const classInfo = await this.academicsService.getClassWithPLevelForUser(+id, user);
+    const students = await this.academicsService.getClassStudentsForUser(+id, user);
     const data: ClassExportData = {
       className: classInfo.name,
       pLevelName: classInfo.pLevelName,

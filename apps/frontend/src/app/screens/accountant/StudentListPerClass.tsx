@@ -10,7 +10,7 @@ import {
     Users,
     Utensils,
 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import { toast } from "sonner";
 import { api } from "../../../lib/api";
@@ -128,17 +128,19 @@ export function StudentListPerClass() {
   useAutoRefresh(loadEnrollments);
 
   // ── Derived rows ──────────────────────────────────────────────────────────
-  const seenStudentIds = new Set<number>();
-  const allRows: StudentRow[] = classes.flatMap(c =>
-    (c.students ?? []).map((s: any) => ({
-      id: s.id, name: s.name, rank: s.rank, marks_percentage: s.marks_percentage,
-      former_class: s.former_class, classId: c.id, className: `${c.p_level?.name ?? ''}${c.name}`,
-    }))
-  ).filter(r => {
-    if (seenStudentIds.has(r.id)) return false;
-    seenStudentIds.add(r.id);
-    return true;
-  });
+  const allRows = useMemo<StudentRow[]>(() => {
+    const seenStudentIds = new Set<number>();
+    return classes.flatMap(c =>
+      (c.students ?? []).map((s: any) => ({
+        id: s.id, name: s.name, rank: s.rank, marks_percentage: s.marks_percentage,
+        former_class: s.former_class, classId: c.id, className: `${c.p_level?.name ?? ''}${c.name}`,
+      }))
+    ).filter(r => {
+      if (seenStudentIds.has(r.id)) return false;
+      seenStudentIds.add(r.id);
+      return true;
+    });
+  }, [classes]);
 
   useEffect(() => {
     setStudentEdits(Object.fromEntries(allRows.map((row) => [row.id, {
@@ -304,8 +306,14 @@ export function StudentListPerClass() {
 
   if (loading) {
     return (
-      <div className="flex justify-center py-20">
-        <Loader2 className="animate-spin" size={32} style={{ color: "var(--navy-blue)" }} />
+      <div className="space-y-6">
+        <Button variant="ghost" size="sm" onClick={() => navigate("/accountant/class-lists")}
+          style={{ color: "var(--maroon)" }}>
+          <ArrowLeft size={18} className="mr-2" /> Back to P-Levels
+        </Button>
+        <div className="flex justify-center py-20">
+          <Loader2 className="animate-spin" size={32} style={{ color: "var(--navy-blue)" }} />
+        </div>
       </div>
     );
   }
@@ -315,7 +323,7 @@ export function StudentListPerClass() {
       <div className="flex items-center gap-4">
         <Button variant="ghost" size="sm" onClick={() => navigate("/accountant/class-lists")}
           style={{ color: "var(--maroon)" }}>
-          <ArrowLeft size={18} className="mr-2" /> Back to Class Lists
+          <ArrowLeft size={18} className="mr-2" /> Back to P-Levels
         </Button>
       </div>
 

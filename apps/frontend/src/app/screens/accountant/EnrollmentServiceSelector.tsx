@@ -1,4 +1,4 @@
-import { Bus, Utensils } from "lucide-react";
+import { ArrowLeft, Bus, Utensils } from "lucide-react";
 import { useNavigate } from "react-router";
 import { Button } from "../../components/ui/button";
 import { Card, CardContent } from "../../components/ui/card";
@@ -8,6 +8,10 @@ export function EnrollmentServiceSelector() {
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
+      <Button variant="ghost" size="sm" onClick={() => navigate("/accountant/dashboard")}
+        style={{ color: "var(--maroon)" }}>
+        <ArrowLeft size={16} className="mr-2" /> Back to Dashboard
+      </Button>
       <div className="text-center">
         <h1 className="text-2xl font-semibold" style={{ color: "var(--dark-gray)" }}>
           Enrollment Management

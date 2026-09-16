@@ -44,10 +44,6 @@ export class InitialSchema1787032378301 implements MigrationInterface {
         await queryRunner.query(`CREATE INDEX "IDX_74c8985e5362fc60ec56270433" ON "attendance_sessions" ("date") `);
         await queryRunner.query(`CREATE TABLE "audit_logs" ("id" SERIAL NOT NULL, "created_at" TIMESTAMP NOT NULL DEFAULT now(), "actor_id" integer, "actor_name" character varying NOT NULL DEFAULT 'System', "actor_role" character varying NOT NULL DEFAULT 'system', "action" character varying NOT NULL, "details" text NOT NULL DEFAULT '', "ip_address" character varying NOT NULL DEFAULT '—', CONSTRAINT "PK_1bb179d048bbc581caa3b013439" PRIMARY KEY ("id"))`);
         await queryRunner.query(`CREATE INDEX "IDX_2cd10fda8276bb995288acfbfb" ON "audit_logs" ("created_at") `);
-        await queryRunner.query(`CREATE TABLE "timetable_slots" ("id" SERIAL NOT NULL, "plan_id" integer NOT NULL, "p_level_name" character varying(10) NOT NULL, "section_name" character varying(5) NOT NULL, "day" smallint NOT NULL, "period" smallint NOT NULL, "start_time" character varying(5), "end_time" character varying(5), "is_break" boolean NOT NULL DEFAULT false, "course_code" character varying(30), "teacher_name" character varying(100), "is_manual_override" boolean NOT NULL DEFAULT false, "created_at" TIMESTAMP NOT NULL DEFAULT now(), "updated_at" TIMESTAMP NOT NULL DEFAULT now(), CONSTRAINT "UQ_bbaf53d4b2600b45a0ee6315ecd" UNIQUE ("plan_id", "p_level_name", "section_name", "day", "period"), CONSTRAINT "PK_b2253a56b9d36d00f84aff7efcc" PRIMARY KEY ("id"))`);
-        await queryRunner.query(`CREATE INDEX "IDX_fcb22897c9d1180a062f8cb181" ON "timetable_slots" ("plan_id") `);
-        await queryRunner.query(`CREATE TYPE "public"."timetable_plans_status_enum" AS ENUM('draft', 'generated', 'finalized')`);
-        await queryRunner.query(`CREATE TABLE "timetable_plans" ("id" SERIAL NOT NULL, "academic_year_id" integer NOT NULL, "name" character varying(100) NOT NULL, "status" "public"."timetable_plans_status_enum" NOT NULL DEFAULT 'draft', "created_by" integer NOT NULL, "skeleton_config" jsonb, "courses_config" jsonb, "teachers_config" jsonb, "generation_log" jsonb, "created_at" TIMESTAMP NOT NULL DEFAULT now(), "updated_at" TIMESTAMP NOT NULL DEFAULT now(), CONSTRAINT "PK_b079d38bdd3c16ffaabc1147e84" PRIMARY KEY ("id"))`);
         await queryRunner.query(`ALTER TABLE "notifications" ADD CONSTRAINT "FK_692a909ee0fa9383e7859f9b406" FOREIGN KEY ("userId") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE NO ACTION`);
         await queryRunner.query(`ALTER TABLE "enrollments" ADD CONSTRAINT "FK_bf3ba3dfa95e2df7388eb4589fd" FOREIGN KEY ("studentId") REFERENCES "students"("id") ON DELETE CASCADE ON UPDATE NO ACTION`);
         await queryRunner.query(`ALTER TABLE "enrollments" ADD CONSTRAINT "FK_c57785bf900d3c09a35f29edf90" FOREIGN KEY ("zoneId") REFERENCES "zones"("id") ON DELETE SET NULL ON UPDATE NO ACTION`);
@@ -63,15 +59,9 @@ export class InitialSchema1787032378301 implements MigrationInterface {
         await queryRunner.query(`ALTER TABLE "classes" ADD CONSTRAINT "FK_832189b36c0c99a78554548f8f1" FOREIGN KEY ("pLevelId") REFERENCES "p_levels"("id") ON DELETE CASCADE ON UPDATE NO ACTION`);
         await queryRunner.query(`ALTER TABLE "classes" ADD CONSTRAINT "FK_4b7ac7a7eb91f3e04229c7c0b6f" FOREIGN KEY ("teacherId") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE NO ACTION`);
         await queryRunner.query(`ALTER TABLE "p_levels" ADD CONSTRAINT "FK_47952b66581858f2ea52f5db006" FOREIGN KEY ("academicYearId") REFERENCES "academic_years"("id") ON DELETE CASCADE ON UPDATE NO ACTION`);
-        await queryRunner.query(`ALTER TABLE "timetable_slots" ADD CONSTRAINT "FK_fcb22897c9d1180a062f8cb181b" FOREIGN KEY ("plan_id") REFERENCES "timetable_plans"("id") ON DELETE CASCADE ON UPDATE NO ACTION`);
-        await queryRunner.query(`ALTER TABLE "timetable_plans" ADD CONSTRAINT "FK_a975ae0f0900faa9d0430e9d1d9" FOREIGN KEY ("academic_year_id") REFERENCES "academic_years"("id") ON DELETE CASCADE ON UPDATE NO ACTION`);
-        await queryRunner.query(`ALTER TABLE "timetable_plans" ADD CONSTRAINT "FK_00b23c8f9163b1c0f728a4b9d65" FOREIGN KEY ("created_by") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE NO ACTION`);
     }
 
     public async down(queryRunner: QueryRunner): Promise<void> {
-        await queryRunner.query(`ALTER TABLE "timetable_plans" DROP CONSTRAINT "FK_00b23c8f9163b1c0f728a4b9d65"`);
-        await queryRunner.query(`ALTER TABLE "timetable_plans" DROP CONSTRAINT "FK_a975ae0f0900faa9d0430e9d1d9"`);
-        await queryRunner.query(`ALTER TABLE "timetable_slots" DROP CONSTRAINT "FK_fcb22897c9d1180a062f8cb181b"`);
         await queryRunner.query(`ALTER TABLE "p_levels" DROP CONSTRAINT "FK_47952b66581858f2ea52f5db006"`);
         await queryRunner.query(`ALTER TABLE "classes" DROP CONSTRAINT "FK_4b7ac7a7eb91f3e04229c7c0b6f"`);
         await queryRunner.query(`ALTER TABLE "classes" DROP CONSTRAINT "FK_832189b36c0c99a78554548f8f1"`);
@@ -87,10 +77,6 @@ export class InitialSchema1787032378301 implements MigrationInterface {
         await queryRunner.query(`ALTER TABLE "enrollments" DROP CONSTRAINT "FK_c57785bf900d3c09a35f29edf90"`);
         await queryRunner.query(`ALTER TABLE "enrollments" DROP CONSTRAINT "FK_bf3ba3dfa95e2df7388eb4589fd"`);
         await queryRunner.query(`ALTER TABLE "notifications" DROP CONSTRAINT "FK_692a909ee0fa9383e7859f9b406"`);
-        await queryRunner.query(`DROP TABLE "timetable_plans"`);
-        await queryRunner.query(`DROP TYPE "public"."timetable_plans_status_enum"`);
-        await queryRunner.query(`DROP INDEX "public"."IDX_fcb22897c9d1180a062f8cb181"`);
-        await queryRunner.query(`DROP TABLE "timetable_slots"`);
         await queryRunner.query(`DROP INDEX "public"."IDX_2cd10fda8276bb995288acfbfb"`);
         await queryRunner.query(`DROP TABLE "audit_logs"`);
         await queryRunner.query(`DROP INDEX "public"."IDX_74c8985e5362fc60ec56270433"`);

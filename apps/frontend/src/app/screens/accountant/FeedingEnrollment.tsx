@@ -1,4 +1,4 @@
-import { Download, Loader2, MoreVertical, Plus, Search, Utensils } from "lucide-react";
+import { ArrowLeft, Download, Loader2, MoreVertical, Plus, Search, Utensils } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { toast } from "sonner";
@@ -205,6 +205,10 @@ export function FeedingEnrollment() {
     <div className="space-y-6">
       <div className="flex items-start justify-between flex-wrap gap-3">
         <div>
+          <Button variant="ghost" size="sm" onClick={() => navigate('/accountant/enrollment')}
+            style={{ color: "var(--maroon)" }}>
+            <ArrowLeft size={16} className="mr-2" /> Back to Enrollments
+          </Button>
           <h1 className="text-2xl font-semibold" style={{ color: "var(--dark-gray)" }}>School Feeding</h1>
           <p className="text-sm mt-1" style={{ color: "var(--mid-gray)" }}>
             Tick Breakfast (B) and Lunch (L) per month for each enrolled student

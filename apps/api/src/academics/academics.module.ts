@@ -15,7 +15,6 @@ import { Student } from '../entities/student.entity';
 import { Subject } from '../entities/subject.entity';
 import { TeachingAssignment } from '../entities/teaching-assignment.entity';
 import { Term } from '../entities/term.entity';
-import { UploadedTimetable } from '../entities/uploaded-timetable.entity';
 import { User } from '../entities/user.entity';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { AcademicsController } from './academics.controller';
@@ -36,7 +35,7 @@ import { TeachingService } from './teaching/teaching.service';
       PLevel, Class, Student, ShuffleSession, ShuffleResult, AcademicYear,
       Attendance, AttendanceSession,
       Term, Subject, AssessmentType, Assessment, AssessmentScore,
-      TeachingAssignment, User, CourseCatalogue, UploadedTimetable,
+      TeachingAssignment, User, CourseCatalogue,
     ]),
     NotificationsModule,
   ],

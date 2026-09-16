@@ -1,4 +1,4 @@
-import { Bus, Download, Loader2, MoreVertical, Plus, Search } from "lucide-react";
+import { ArrowLeft, Bus, Download, Loader2, MoreVertical, Plus, Search } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { toast } from "sonner";
@@ -216,6 +216,10 @@ export function TransportEnrollment() {
     <div className="space-y-6">
       <div className="flex items-start justify-between flex-wrap gap-3">
         <div>
+          <Button variant="ghost" size="sm" onClick={() => navigate('/accountant/enrollment')}
+            style={{ color: "var(--maroon)" }}>
+            <ArrowLeft size={16} className="mr-2" /> Back to Enrollments
+          </Button>
           <h1 className="text-2xl font-semibold" style={{ color: "var(--dark-gray)" }}>Transport</h1>
           <p className="text-sm mt-1" style={{ color: "var(--mid-gray)" }}>
             Assign a zone and tick monthly payments for each enrolled student

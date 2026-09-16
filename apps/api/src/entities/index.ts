@@ -16,8 +16,6 @@ import { Student } from './student.entity';
 import { Subject } from './subject.entity';
 import { TeachingAssignment } from './teaching-assignment.entity';
 import { Term } from './term.entity';
-import { UploadedTimetable } from './uploaded-timetable.entity';
-// Timetable entities removed
 import { User } from './user.entity';
 import { Zone } from './zone.entity';
 
@@ -49,7 +47,6 @@ export const entities = [
   Term,
   User,
   Zone,
-  UploadedTimetable,
 ];
 
 export {
@@ -70,7 +67,6 @@ export {
     Student,
     Subject,
     TeachingAssignment,
-    Term, UploadedTimetable, User,
+    Term, User,
     Zone
 };
-

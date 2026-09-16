@@ -114,5 +114,4 @@ carried a Render blueprint before that. Both were removed once Vercel and
 Railway became the live stack; the configuration is still in git history if it
 is ever needed.
 
-`apps/api/Dockerfile` remains — Railway builds from it, and
-`config/docker/docker-compose.yml` uses it for local development.
+Railway builds the API directly from `apps/api`.

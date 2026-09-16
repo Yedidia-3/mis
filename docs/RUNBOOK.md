@@ -99,9 +99,6 @@ the troubleshooting section of [DEPLOYMENT.md](../DEPLOYMENT.md).
 5. Have the dean run the shuffle per P-level, and the principal approve it.
    Nothing moves until approval, so a proposal can be re-run freely.
 6. Assign teachers to classes.
-7. Build the timetable. Read the warnings it produces — the solver reports
-   under-placed courses rather than failing, so a timetable can look finished
-   while a course is short of periods.
 
 ---
 

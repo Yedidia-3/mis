@@ -134,7 +134,6 @@ export function TeacherDashboard() {
         </CardContent>
       </Card>
 
-      {/* Timetable feature removed */}
     </div>
   );
 }

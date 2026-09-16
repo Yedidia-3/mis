@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import * as ExcelJS from 'exceljs';
 import { Repository } from 'typeorm';
@@ -8,7 +8,6 @@ import { Attendance } from '../entities/attendance.entity';
 import { Class } from '../entities/class.entity';
 import { PLevel } from '../entities/p-level.entity';
 import { Student } from '../entities/student.entity';
-import { UploadedTimetable } from '../entities/uploaded-timetable.entity';
 import { User } from '../entities/user.entity';
 import { NotificationsService } from '../notifications/notifications.service';
 import { TeachingService } from './teaching/teaching.service';
@@ -24,7 +23,6 @@ export class AcademicsService {
     @InjectRepository(AttendanceSession) private attendanceSessionRepo: Repository<AttendanceSession>,
     private notificationsService: NotificationsService,
     private teachingService: TeachingService,
-    @InjectRepository(UploadedTimetable) private uploadedTimetableRepo: Repository<UploadedTimetable>,
     @InjectRepository(User) private userRepo: Repository<User>,
   ) {}
 
@@ -411,143 +409,6 @@ export class AcademicsService {
     };
   }
 
-  // -------------------- Timetable upload + views -------------------------
-  async uploadTimetable(academicYearId: number, buffer: Buffer, uploadedBy: number) {
-    const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.load(buffer as any);
-
-    const parsedSheets: any[] = [];
-
-    for (const sheet of workbook.worksheets) {
-      // Build a flexible header map from first row
-      const rows = [] as any[];
-      const headerRow = sheet.getRow(1);
-      const headers: string[] = [];
-      headerRow.eachCell((cell, colNumber) => {
-        headers[colNumber] = String(cell.value ?? '').trim().toLowerCase();
-      });
-
-      sheet.eachRow((row, rowNumber) => {
-        if (rowNumber === 1) return; // skip header
-        const obj: any = {};
-        row.eachCell((cell, colNumber) => {
-          const key = headers[colNumber] ?? `col${colNumber}`;
-          obj[key] = cell.value;
-        });
-        // ignore empty rows
-        if (Object.values(obj).every((v) => v === null || v === undefined || String(v).trim() === '')) return;
-        rows.push(obj);
-      });
-
-      parsedSheets.push({ name: sheet.name, rows });
-    }
-
-    // Build teacher mapping by attempting to match sheet-level teacher columns or
-    // scanning sheet contents for known teacher names. This produces a
-    // `teacher_map` keyed by sheet name with { detectedName, userId } so the
-    // teacher-specific view can be authoritative.
-    const teachers = await this.userRepo.find({ where: { role: 'teacher', status: 'active' } });
-    const teacherMap: Record<string, { detectedName: string | null; userId: number | null }> = {};
-
-    for (const s of parsedSheets) {
-      const rows = s.rows || [];
-      let detectedName: string | null = null;
-      // Prefer explicit teacher column if present
-      const teacherValues: string[] = [];
-      for (const r of rows) {
-        if (r.teacher) teacherValues.push(String(r.teacher).trim());
-        else if (r.teacher_name) teacherValues.push(String(r.teacher_name).trim());
-      }
-      if (teacherValues.length > 0) {
-        // pick the most common non-empty value
-        const freq = new Map<string, number>();
-        for (const v of teacherValues) {
-          if (!v) continue;
-          const key = v.toLowerCase();
-          freq.set(key, (freq.get(key) || 0) + 1);
-        }
-        if (freq.size > 0) {
-          const top = Array.from(freq.entries()).sort((a, b) => b[1] - a[1])[0][0];
-          detectedName = teacherValues.find((t) => t.toLowerCase() === top) ?? null;
-        }
-      }
-
-      // Fallback: scan for teacher full-name substrings in sheet cells
-      if (!detectedName) {
-        for (const t of teachers) {
-          const tn = t.name.toLowerCase();
-          const found = rows.some((r: any) => Object.values(r).some((c: any) => typeof c === 'string' && c.toLowerCase().includes(tn)));
-          if (found) { detectedName = t.name; break; }
-        }
-      }
-
-      const matched = detectedName ? teachers.find((u) => u.name.toLowerCase() === detectedName!.toLowerCase()) : null;
-      teacherMap[s.name] = { detectedName: detectedName ?? null, userId: matched ? matched.id : null };
-    }
-
-    const entity = this.uploadedTimetableRepo.create({
-      name: `Upload ${new Date().toISOString()}`,
-      academic_year_id: academicYearId,
-      uploaded_by: uploadedBy,
-      data: { sheets: parsedSheets, teacher_map: teacherMap },
-    });
-    const saved = await this.uploadedTimetableRepo.save(entity);
-    return { id: saved.id, message: `Uploaded ${parsedSheets.length} sheet(s)` };
-  }
-
-  async listUploadedTimetables(academicYearId: number) {
-    const rows = await this.uploadedTimetableRepo.find({ where: { academic_year_id: academicYearId }, order: { created_at: 'DESC' } });
-    return rows.map((r) => ({ id: r.id, name: r.name, created_at: r.created_at }));
-  }
-
-  async getUploadedTimetable(id: number) {
-    const rec = await this.uploadedTimetableRepo.findOne({ where: { id } });
-    if (!rec) throw new NotFoundException('Uploaded timetable not found');
-    // Return the stored data as the payload so the frontend receives { sheets, teacher_map }
-    // along with the upload id for context.
-    return { id: rec.id, ...(rec.data ?? {}) };
-  }
-
-  async getTeacherTimetable(teacherId: number) {
-    // Use the stored teacher_map (if available) to determine which sheets
-    // belong to the requested teacher. Also include any global sheets.
-    const rec = await this.uploadedTimetableRepo.findOne({ order: { created_at: 'DESC' } });
-    if (!rec) return { sheets: [] };
-    const sheets = rec.data?.sheets ?? [];
-    const teacherMap = rec.data?.teacher_map ?? {};
-
-    const isGlobal = (name: string) => /global|all|master/i.test(name);
-
-    const result = sheets
-      .filter((s: any) => {
-        const mapping = teacherMap?.[s.name];
-        if (mapping && mapping.userId) return mapping.userId === teacherId;
-        if (isGlobal(s.name)) return true;
-        // Fallback: include sheet if any cell contains the teacher's id as string
-        return s.rows.some((r: any) => Object.values(r).some((v: any) => String(v ?? '').toLowerCase().includes(String(teacherId))));
-      })
-      .map((s: any) => ({ name: s.name, rows: s.rows }));
-
-    return { id: rec.id, sheets: result };
-  }
-
-  async exportUploadedTimetable(id: number) {
-    const rec = await this.uploadedTimetableRepo.findOne({ where: { id } });
-    if (!rec) throw new NotFoundException('Uploaded timetable not found');
-    const wb = new ExcelJS.Workbook();
-    for (const s of rec.data.sheets || []) {
-      const ws = wb.addWorksheet(s.name.substring(0, 30));
-      const rows = s.rows || [];
-      if (rows.length === 0) continue;
-      const headerKeys = Object.keys(rows[0]);
-      ws.addRow(headerKeys.map((h) => h.toString()));
-      for (const r of rows) {
-        ws.addRow(headerKeys.map((k) => r[k]));
-      }
-    }
-    return await wb.xlsx.writeBuffer();
-  }
-
   // ─── Teacher portal ───────────────────────────────────────────────────────────
 
   async getTeacherClasses(teacherId: number) {
@@ -579,6 +440,39 @@ export class AcademicsService {
     });
   }
 
+  private async assertTeacherOwnsClass(classId: number, user: User) {
+    if (user.role !== 'teacher') return;
+    const cls = await this.classRepo.findOne({ where: { id: classId, teacher_id: user.id, status: 'active' } });
+    if (!cls) throw new ForbiddenException('You can only manage your assigned classes');
+  }
+
+  async getClassStudentsForUser(classId: number, user: User) {
+    await this.assertTeacherOwnsClass(classId, user);
+    return this.getClassStudents(classId);
+  }
+
+  async addStudentsToClassForUser(classId: number, students: Array<{ name?: string }>, user: User) {
+    await this.assertTeacherOwnsClass(classId, user);
+    return this.addStudentsToClass(classId, students);
+  }
+
+  async updateStudentForUser(studentId: number, updates: Parameters<AcademicsService['updateStudent']>[1], user: User) {
+    const student = await this.studentRepo.findOne({ where: { id: studentId } });
+    if (!student) throw new NotFoundException('Student not found');
+    await this.assertTeacherOwnsClass(student.current_class_id, user);
+    return this.updateStudent(studentId, updates);
+  }
+
+  async removeStudentFromClassForUser(studentId: number, user: User) {
+    const student = await this.studentRepo.findOne({ where: { id: studentId } });
+    if (!student) throw new NotFoundException('Student not found');
+    await this.assertTeacherOwnsClass(student.current_class_id, user);
+    // Preserve the student and their history; only remove the roster assignment.
+    student.current_class_id = null;
+    await this.studentRepo.save(student);
+    return { message: 'Student removed from the class list' };
+  }
+
   async getClassWithPLevel(classId: number) {
     const rows = await this.classRepo.query(
       `SELECT c.name, pl.name AS p_level_name
@@ -588,6 +482,11 @@ export class AcademicsService {
     );
     if (!rows.length) throw new NotFoundException('Class not found');
     return { name: rows[0].name, pLevelName: rows[0].p_level_name };
+  }
+
+  async getClassWithPLevelForUser(classId: number, user: User) {
+    await this.assertTeacherOwnsClass(classId, user);
+    return this.getClassWithPLevel(classId);
   }
 
   // Today's at-a-glance numbers for the teacher dashboard.
@@ -666,6 +565,11 @@ export class AcademicsService {
     };
   }
 
+  async getClassAttendanceForUser(classId: number, date: string, user: User) {
+    await this.assertTeacherOwnsClass(classId, user);
+    return this.getClassAttendance(classId, date);
+  }
+
   // Submit attendance for a class on a date — ONE per day. Locks the day,
   // auto-notifies the Dean(s), and archives a session row for history.
   async saveClassAttendance(
@@ -717,6 +621,16 @@ export class AcademicsService {
     return { message: 'Attendance submitted', locked: true, present, absent, late, total };
   }
 
+  async saveClassAttendanceForUser(
+    classId: number,
+    date: string,
+    records: { student_id: number; status: 'present' | 'absent' | 'late' }[],
+    user: User,
+  ) {
+    await this.assertTeacherOwnsClass(classId, user);
+    return this.saveClassAttendance(classId, date, records, user.id);
+  }
+
   // Reset a day's attendance so the teacher can redo it (mistake correction).
   async resetClassAttendance(classId: number, date: string, teacherId: number) {
     if (!date) throw new BadRequestException('Date is required');
@@ -729,6 +643,11 @@ export class AcademicsService {
     // Inform the dean and principal the record was reset
     await this.notifySupervisorsOfAttendance(classId, date, teacherId, null);
     return { message: 'Attendance reset — you can record it again', locked: false };
+  }
+
+  async resetClassAttendanceForUser(classId: number, date: string, user: User) {
+    await this.assertTeacherOwnsClass(classId, user);
+    return this.resetClassAttendance(classId, date, user.id);
   }
 
   // Submitted attendance history for a teacher's classes (archive view).

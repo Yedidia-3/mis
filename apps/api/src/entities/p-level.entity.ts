@@ -35,8 +35,8 @@ export class PLevel {
   /**
    * The most periods a week a teacher at this level should be scheduled for.
    *
-   * A cap rather than a target: the timetable warns when an assignment would
-   * exceed it. Levels differ, which is why it lives here and not on the user.
+   * A cap rather than a target: assignment validation prevents workloads
+   * beyond it. Levels differ, which is why it lives here and not on the user.
    */
   @Column({ type: 'int', default: 30 })
   max_periods_per_teacher: number;

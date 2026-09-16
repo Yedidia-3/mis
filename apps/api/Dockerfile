@@ -1,6 +1,6 @@
 # ── Stage 1: Build ──────────────────────────────────────────────────────────
 # Build context is apps/api, not the repo root.
-# Used by Railway (production) and by config/docker/docker-compose.yml locally.
+# Used by Railway for production builds.
 FROM node:20-alpine AS builder
 WORKDIR /app
 

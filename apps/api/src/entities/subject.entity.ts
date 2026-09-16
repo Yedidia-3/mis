@@ -5,7 +5,7 @@ import { PLevel } from './p-level.entity';
 import { CourseCatalogue } from './course-catalogue.entity';
 
 // A subject taught at one P-level. Scoped per level because P1 and P6 do not
-// take the same subjects — the same shape the timetable's courses_config uses.
+// take the same subjects.
 @Entity('subjects')
 @Unique(['p_level_id', 'code'])
 export class Subject {
@@ -37,8 +37,7 @@ export class Subject {
   // different subjects with different demands — which is exactly why subjects
   // are scoped to a level.
   //
-  // The timetable reads these, so the dean sets them once here instead of
-  // re-entering them for every plan.
+  // The dean sets these once here instead of re-entering them for every class.
   @Column({ type: 'int', default: 5 })
   periods_per_week: number;
 

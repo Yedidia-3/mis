@@ -1,6 +1,6 @@
 ﻿import { useState, useEffect } from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router";
-import { Search, Download, ArrowLeft, Loader2 } from "lucide-react";
+import { Search, Download, ArrowLeft, Loader2, Pencil, Plus, Save, Trash2, X } from "lucide-react";
 import { Card, CardContent } from "../../components/ui/card";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
@@ -32,6 +32,11 @@ export function MyClassStudentList() {
   const [searchTerm, setSearchTerm] = useState("");
   const [formerClassFilter, setFormerClassFilter] = useState<string>("all");
   const [showDownloadDialog, setShowDownloadDialog] = useState(false);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [draft, setDraft] = useState({ name: "", former_class: "", rank: "", marks_percentage: "" });
+  const [saving, setSaving] = useState(false);
+  const [newStudentName, setNewStudentName] = useState("");
+  const [removingId, setRemovingId] = useState<number | null>(null);
 
   useEffect(() => {
     const load = async () => {
@@ -56,6 +61,72 @@ export function MyClassStudentList() {
     const matchesFormer = formerClassFilter === "all" || s.former_class === formerClassFilter;
     return matchesSearch && matchesFormer;
   });
+
+  const beginEdit = (student: Student) => {
+    setEditingId(student.id);
+    setDraft({
+      name: student.name,
+      former_class: student.former_class ?? "",
+      rank: student.rank?.toString() ?? "",
+      marks_percentage: student.marks_percentage?.toString() ?? "",
+    });
+  };
+
+  const saveStudent = async (studentId: number) => {
+    if (!draft.name.trim()) return toast.error("Student name is required");
+    const rank = draft.rank === "" ? null : Number(draft.rank);
+    const marks = draft.marks_percentage === "" ? null : Number(draft.marks_percentage);
+    if ((rank !== null && (!Number.isFinite(rank) || rank < 0)) || (marks !== null && (!Number.isFinite(marks) || marks < 0 || marks > 100))) {
+      return toast.error("Use a non-negative rank and marks between 0 and 100");
+    }
+    setSaving(true);
+    try {
+      await api.put(`/api/v1/academics/students/${studentId}`, {
+        name: draft.name.trim(), former_class: draft.former_class.trim() || null, rank, marks_percentage: marks,
+      });
+      setStudents((current) => current.map((student) => student.id === studentId ? {
+        ...student, name: draft.name.trim(), former_class: draft.former_class.trim() || null, rank, marks_percentage: marks,
+      } : student));
+      setEditingId(null);
+      toast.success("Student updated");
+    } catch (error: any) {
+      toast.error(error.message ?? "Failed to update student");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const addStudent = async () => {
+    if (!classId || !newStudentName.trim()) return toast.error("Student name is required");
+    setSaving(true);
+    try {
+      const result = await api.post<{ students: Array<{ id: number; name: string }> }>(`/api/v1/academics/classes/${classId}/students`, {
+        students: [{ name: newStudentName.trim() }],
+      });
+      const added = result.students?.[0];
+      if (added) setStudents((current) => [...current, { ...added, former_class: null, rank: null, marks_percentage: null, current_class_id: Number(classId) }]);
+      setNewStudentName("");
+      toast.success("Student added to the class list");
+    } catch (error: any) {
+      toast.error(error.message ?? "Failed to add student");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const removeStudent = async (student: Student) => {
+    if (!window.confirm(`Remove ${student.name} from this class list? Their school record will be kept.`)) return;
+    setRemovingId(student.id);
+    try {
+      await api.delete(`/api/v1/academics/students/${student.id}`);
+      setStudents((current) => current.filter((item) => item.id !== student.id));
+      toast.success(`${student.name} removed from the class list`);
+    } catch (error: any) {
+      toast.error(error.message ?? "Failed to remove student");
+    } finally {
+      setRemovingId(null);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -89,6 +160,13 @@ export function MyClassStudentList() {
 
       <Card style={{ borderColor: "var(--border)" }}>
         <CardContent className="p-6">
+          <div className="flex flex-col sm:flex-row gap-2 mb-6">
+            <Input value={newStudentName} onChange={(e) => setNewStudentName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") addStudent(); }} placeholder="New student name" className="h-11" />
+            <Button onClick={addStudent} disabled={saving || !newStudentName.trim()} className="h-11 whitespace-nowrap">
+              <Plus size={16} className="mr-2" /> Add Student
+            </Button>
+          </div>
           <div className="flex flex-col md:flex-row gap-4 mb-6">
             <div className="flex-1 relative">
               <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: "var(--mid-gray)" }} />
@@ -122,12 +200,13 @@ export function MyClassStudentList() {
                     <TableHead className="text-white">Former Class</TableHead>
                     <TableHead className="text-white">Rank</TableHead>
                     <TableHead className="text-white">Marks %</TableHead>
+                    <TableHead className="text-white">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {filteredStudents.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={5} className="text-center py-8" style={{ color: "var(--mid-gray)" }}>
+                      <TableCell colSpan={6} className="text-center py-8" style={{ color: "var(--mid-gray)" }}>
                         No students found
                       </TableCell>
                     </TableRow>
@@ -135,18 +214,23 @@ export function MyClassStudentList() {
                     <TableRow key={student.id}
                       style={{ backgroundColor: index % 2 === 0 ? "#FFFFFF" : "var(--light-gray)" }}>
                       <TableCell className="text-sm" style={{ color: "var(--mid-gray)" }}>{index + 1}</TableCell>
-                      <TableCell className="font-medium" style={{ color: "var(--dark-gray)" }}>{student.name}</TableCell>
+                      <TableCell className="font-medium" style={{ color: "var(--dark-gray)" }}>
+                        {editingId === student.id ? <Input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} className="h-8 min-w-36" /> : student.name}
+                      </TableCell>
                       <TableCell>
-                        {student.former_class ? (
+                        {editingId === student.id ? <Input value={draft.former_class} onChange={(e) => setDraft({ ...draft, former_class: e.target.value })} className="h-8 min-w-24" /> : student.former_class ? (
                           <span className="px-3 py-1 rounded-full text-xs font-semibold text-white"
                             style={{ backgroundColor: colorMap[student.former_class] ?? "var(--mid-gray)" }}>
                             {student.former_class}
                           </span>
                         ) : <span style={{ color: "var(--mid-gray)" }}>—</span>}
                       </TableCell>
-                      <TableCell style={{ color: "var(--dark-gray)" }}>{student.rank ?? '—'}</TableCell>
+                      <TableCell style={{ color: "var(--dark-gray)" }}>{editingId === student.id ? <Input type="number" min="0" value={draft.rank} onChange={(e) => setDraft({ ...draft, rank: e.target.value })} className="h-8 w-20" /> : student.rank ?? '—'}</TableCell>
                       <TableCell style={{ color: "var(--dark-gray)" }}>
-                        {student.marks_percentage != null ? `${student.marks_percentage}%` : '—'}
+                        {editingId === student.id ? <Input type="number" min="0" max="100" value={draft.marks_percentage} onChange={(e) => setDraft({ ...draft, marks_percentage: e.target.value })} className="h-8 w-20" /> : student.marks_percentage != null ? `${student.marks_percentage}%` : '—'}
+                      </TableCell>
+                      <TableCell>
+                        {editingId === student.id ? <div className="flex gap-1"><Button size="sm" disabled={saving} onClick={() => saveStudent(student.id)}><Save size={14} className="mr-1" />Save</Button><Button size="sm" variant="ghost" disabled={saving} onClick={() => setEditingId(null)}><X size={14} className="mr-1" />Cancel</Button></div> : <div className="flex gap-1"><Button size="sm" variant="outline" onClick={() => beginEdit(student)}><Pencil size={14} className="mr-1" />Edit</Button><Button size="sm" variant="ghost" disabled={removingId === student.id} onClick={() => removeStudent(student)} className="text-red-600"><Trash2 size={14} className="mr-1" />Remove</Button></div>}
                       </TableCell>
                     </TableRow>
                   ))}
