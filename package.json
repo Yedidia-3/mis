@@ -3,7 +3,8 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "build": "npm --prefix apps/api run build",
-    "start": "npm --prefix apps/api run start"
+    "postinstall": "npm --prefix apps/api install",
+    "build": "cd apps/api && npx nest build",
+    "start": "node apps/api/dist/main.js"
   }
 }
