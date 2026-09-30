@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 
 export type UserRole = 'super_admin' | 'dean' | 'principal' | 'teacher' | 'accountant';
 
@@ -21,34 +21,69 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
-export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<AuthUser | null>(() => {
-    try {
-      const stored = localStorage.getItem('user');
-      return stored ? JSON.parse(stored) : null;
-    } catch {
+// Bump this whenever the stored auth shape changes — forces a clean re-login
+const SESSION_VERSION = '2';
+
+function clearSession() {
+  localStorage.removeItem('user');
+  localStorage.removeItem('token');
+}
+
+function loadStoredUser(): AuthUser | null {
+  try {
+    // Invalidate old sessions from previous code versions
+    if (localStorage.getItem('session_version') !== SESSION_VERSION) {
+      clearSession();
+      localStorage.setItem('session_version', SESSION_VERSION);
       return null;
     }
-  });
+    const stored = localStorage.getItem('user');
+    if (!stored) return null;
+    const parsed = JSON.parse(stored) as AuthUser;
+    // Validate the stored object has the required fields
+    if (!parsed?.id || !parsed?.role || !parsed?.email) {
+      clearSession();
+      return null;
+    }
+    return parsed;
+  } catch {
+    clearSession();
+    return null;
+  }
+}
 
-  const [token, setToken] = useState<string | null>(() => localStorage.getItem('token'));
+export function AuthProvider({ children }: { children: ReactNode }) {
+  const [user, setUser] = useState<AuthUser | null>(loadStoredUser);
+  const [token, setToken] = useState<string | null>(() =>
+    localStorage.getItem('session_version') === SESSION_VERSION
+      ? localStorage.getItem('token')
+      : null
+  );
+
+  // Keep session_version in sync
+  useEffect(() => {
+    if (localStorage.getItem('session_version') !== SESSION_VERSION) {
+      clearSession();
+      localStorage.setItem('session_version', SESSION_VERSION);
+    }
+  }, []);
 
   const setAuth = (user: AuthUser, token: string) => {
     setUser(user);
     setToken(token);
     localStorage.setItem('user', JSON.stringify(user));
     localStorage.setItem('token', token);
+    localStorage.setItem('session_version', SESSION_VERSION);
   };
 
   const logout = () => {
     setUser(null);
     setToken(null);
-    localStorage.removeItem('user');
-    localStorage.removeItem('token');
+    clearSession();
   };
 
   return (
-    <AuthContext.Provider value={{ user, token, setAuth, logout, isAuthenticated: !!user }}>
+    <AuthContext.Provider value={{ user, token, setAuth, logout, isAuthenticated: !!user && !!token }}>
       {children}
     </AuthContext.Provider>
   );
