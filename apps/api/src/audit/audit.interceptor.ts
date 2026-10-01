@@ -89,7 +89,7 @@ export class AuditInterceptor implements NestInterceptor {
         const ip = (req.headers?.['x-forwarded-for'] || req.ip || '').toString().split(',')[0] || '—';
 
         // For login, the actor comes from the response/body email (no req.user yet)
-        const actorName = user?.name || req.body?.email || 'System';
+        const actorName = user?.email || req.body?.email || 'System';
         const actorRole = user?.role || (path === '/auth/login' ? 'user' : 'system');
 
         this.audit.log({
