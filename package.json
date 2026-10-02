@@ -5,6 +5,13 @@
   "scripts": {
     "postinstall": "npm --prefix apps/api install",
     "build": "cd apps/api && npx nest build",
-    "start": "node apps/api/dist/main.js"
+    "start": "node apps/api/dist/main.js",
+    "start:dev": "npm --prefix apps/api run start:dev",
+    "dev:api": "npm --prefix apps/api run start:dev",
+    "dev": "npm --prefix apps/frontend run dev",
+    "dev:frontend": "npm --prefix apps/frontend run dev",
+    "db:start": "/usr/lib/postgresql/18/bin/pg_ctl -D .pgdata -o \"-k /tmp -p 5433 -h 127.0.0.1\" -l .pgdata/logfile start",
+    "db:stop": "/usr/lib/postgresql/18/bin/pg_ctl -D .pgdata stop",
+    "db:status": "/usr/lib/postgresql/18/bin/pg_ctl -D .pgdata status"
   }
 }

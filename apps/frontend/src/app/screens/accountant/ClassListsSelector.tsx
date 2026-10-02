@@ -24,6 +24,7 @@ interface PLevelSummary {
 export function ClassListsSelector() {
   const navigate = useNavigate();
   const [pLevels, setPLevels] = useState<PLevelSummary[]>([]);
+  const [activeYearName, setActiveYearName] = useState<string>("");
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -37,6 +38,7 @@ export function ClassListsSelector() {
           setLoading(false);
           return;
         }
+        setActiveYearName(activeYear.name);
 
         const res = await api.get<any>(`/api/v1/academics/all-classes?academic_year_id=${activeYear.id}`);
         const classes: ClassItem[] = Array.isArray(res) ? res : res.data ?? [];
@@ -75,9 +77,18 @@ export function ClassListsSelector() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold" style={{ color: "var(--dark-gray)" }}>Class Lists</h1>
-        <p className="text-sm mt-1" style={{ color: "var(--mid-gray)" }}>View student lists by P-Level</p>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+        <div>
+          <h1 className="text-2xl font-semibold" style={{ color: "var(--dark-gray)" }}>Class Lists</h1>
+          <p className="text-sm mt-1" style={{ color: "var(--mid-gray)" }}>
+            View distributed student class rosters by level
+          </p>
+        </div>
+        {activeYearName && (
+          <span className="px-3 py-1 rounded-full text-xs font-semibold text-white bg-amber-700 self-start sm:self-center">
+            Academic Year {activeYearName}
+          </span>
+        )}
       </div>
 
       {!loading && pLevels.length > 0 && (

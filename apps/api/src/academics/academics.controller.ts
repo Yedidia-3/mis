@@ -88,6 +88,107 @@ export class AcademicsController {
   }
 
   // Students
+  @Get('students')
+  @Roles('dean', 'principal', 'teacher', 'accountant', 'super_admin')
+  listStudents(
+    @Query('academic_year_id') yearId?: string,
+    @Query('p_level_id') pLevelId?: string,
+    @Query('class_id') classId?: string,
+    @Query('search') search?: string,
+    @Query('status') status?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.academicsService.listStudents({
+      academicYearId: yearId ? +yearId : undefined,
+      pLevelId: pLevelId ? +pLevelId : undefined,
+      classId: classId ? +classId : undefined,
+      search,
+      status,
+      page: page ? +page : undefined,
+      limit: limit ? +limit : undefined,
+    });
+  }
+
+  @Post('students/import')
+  @Roles('dean', 'principal', 'teacher', 'accountant', 'super_admin')
+  @UseInterceptors(FileInterceptor('file', { storage: memoryStorage() }))
+  importStudents(
+    @UploadedFile() file: Express.Multer.File,
+    @Query('academic_year_id') yearId?: string,
+    @Query('p_level_id') pLevelId?: string,
+    @Query('class_id') classId?: string,
+    @Query('dry_run') dryRun?: string,
+    @CurrentUser() user?: User,
+  ) {
+    if (!file) throw new BadRequestException('No file uploaded');
+    return this.academicsService.importStudentsUniversal(
+      file.buffer,
+      file.originalname || 'import.xlsx',
+      {
+        academicYearId: yearId ? +yearId : undefined,
+        pLevelId: pLevelId ? +pLevelId : undefined,
+        classId: classId ? +classId : undefined,
+        dryRun: dryRun === 'true',
+      },
+      user,
+    );
+  }
+
+  @Post('students/bulk-delete')
+  @Roles('dean', 'principal', 'teacher', 'accountant', 'super_admin')
+  deleteStudentsBulk(@Body('ids') ids: number[]) {
+    return this.academicsService.deleteStudentsBulk(ids ?? []);
+  }
+
+  @Post('students')
+  @Roles('dean', 'principal', 'teacher', 'accountant', 'super_admin')
+  createStudent(@Body() body: any, @CurrentUser() user: User) {
+    return this.academicsService.createStudent(body ?? {}, user);
+  }
+
+  @Get('students/:id')
+  @Roles('dean', 'principal', 'teacher', 'accountant', 'super_admin')
+  getStudent(@Param('id') id: string) {
+    return this.academicsService.getStudent(+id);
+  }
+
+  @Post('students/:id/approve')
+  @Roles('dean', 'principal', 'super_admin')
+  approveStudent(@Param('id') id: string, @CurrentUser() user: User) {
+    return this.academicsService.approveStudent(+id, user);
+  }
+
+  @Post('students/:id/reject')
+  @Roles('dean', 'principal', 'super_admin')
+  rejectStudent(@Param('id') id: string, @CurrentUser() user: User) {
+    return this.academicsService.rejectStudent(+id, user);
+  }
+
+  @Post('students/bulk-approve')
+  @Roles('dean', 'principal', 'super_admin')
+  approveStudentsBulk(@Body('ids') ids: number[], @CurrentUser() user: User) {
+    return this.academicsService.approveStudentsBulk(ids ?? [], user);
+  }
+
+  @Post('students/bulk-reject')
+  @Roles('dean', 'principal', 'super_admin')
+  rejectStudentsBulk(@Body('ids') ids: number[], @CurrentUser() user: User) {
+    return this.academicsService.rejectStudentsBulk(ids ?? [], user);
+  }
+
+  @Post('classes/:id/approve-imports')
+  @Roles('dean', 'principal', 'super_admin')
+  approveClassImports(@Param('id') id: string, @CurrentUser() user: User) {
+    return this.academicsService.approveClassImports(+id, user);
+  }
+
+  @Post('classes/:id/reject-imports')
+  @Roles('dean', 'principal', 'super_admin')
+  rejectClassImports(@Param('id') id: string, @CurrentUser() user: User) {
+    return this.academicsService.rejectClassImports(+id, user);
+  }
+
   @Get('classes/:id/students')
   @Roles('dean', 'principal', 'teacher', 'accountant')
   getStudents(@Param('id') id: string, @CurrentUser() user: User) {
@@ -105,19 +206,22 @@ export class AcademicsController {
   }
 
   @Put('students/:id')
-  @Roles('dean', 'accountant', 'teacher')
+  @Roles('dean', 'principal', 'teacher', 'accountant', 'super_admin')
   updateStudent(
     @Param('id') id: string,
-    @Body() body: { name?: string; former_class?: string; rank?: number | string; marks_percentage?: number | string },
+    @Body() body: { name?: string; student_id_number?: string; current_class_id?: number; former_class?: string; rank?: number | string; marks_percentage?: number | string; status?: string },
     @CurrentUser() user: User,
   ) {
     return this.academicsService.updateStudentForUser(+id, body ?? {}, user);
   }
 
   @Delete('students/:id')
-  @Roles('dean', 'accountant', 'teacher')
+  @Roles('dean', 'principal', 'teacher', 'accountant', 'super_admin')
   removeStudentFromClass(@Param('id') id: string, @CurrentUser() user: User) {
-    return this.academicsService.removeStudentFromClassForUser(+id, user);
+    if (user.role === 'teacher') {
+      return this.academicsService.removeStudentFromClassForUser(+id, user);
+    }
+    return this.academicsService.deleteStudent(+id);
   }
 
   @Put('students/:id/move')
@@ -126,17 +230,26 @@ export class AcademicsController {
     return this.academicsService.moveStudent(+id, newClassId);
   }
 
-  // Excel import
+  // Excel import (legacy dean import)
   @Post('p-levels/:id/import')
-  @Roles('dean')
+  @Roles('dean', 'principal', 'teacher', 'accountant', 'super_admin')
   @UseInterceptors(FileInterceptor('file', { storage: memoryStorage() }))
   importExcel(
     @Param('id') id: string,
     @Query('academic_year_id') yearId: string,
     @UploadedFile() file: Express.Multer.File,
+    @CurrentUser() user?: User,
   ) {
     if (!file) throw new Error('No file uploaded');
-    return this.academicsService.importExcel(+id, +yearId, file.buffer);
+    return this.academicsService.importStudentsUniversal(
+      file.buffer,
+      file.originalname || 'import.xlsx',
+      {
+        academicYearId: yearId ? +yearId : undefined,
+        pLevelId: +id,
+      },
+      user,
+    );
   }
 
   // Teacher portal
@@ -187,11 +300,33 @@ export class AcademicsController {
     return this.academicsService.getTeacherAttendanceHistory(user.id);
   }
 
+  // Distribution Module
+  @Get('distribution/summary')
+  @Roles('dean', 'principal', 'super_admin', 'accountant')
+  getDistributionSummary(@Query('academic_year_id') yearId?: string) {
+    return this.academicsService.getDistributionSummary(yearId ? +yearId : undefined);
+  }
+
+  @Post('distribution/distribute-class')
+  @Roles('dean', 'principal', 'super_admin')
+  distributeClass(@Body() body: { class_id: number; teacher_id?: number }, @CurrentUser() user: User) {
+    return this.academicsService.distributeClass(body.class_id, body, user);
+  }
+
+  @Post('distribution/distribute-plevel')
+  @Roles('dean', 'principal', 'super_admin')
+  distributePLevel(
+    @Body() body: { p_level_id: number; teacher_assignments?: Array<{ class_id: number; teacher_id: number }> },
+    @CurrentUser() user: User,
+  ) {
+    return this.academicsService.distributePLevel(body.p_level_id, body.teacher_assignments ?? [], user);
+  }
+
   // Accountant portal
   @Get('all-classes')
   @Roles('accountant')
-  getAllClasses(@Query('academic_year_id') yearId: string) {
-    return this.academicsService.getAllDistributedClasses(+yearId);
+  getAllClasses(@Query('academic_year_id') yearId?: string) {
+    return this.academicsService.getAllDistributedClasses(yearId ? +yearId : undefined);
   }
 
   // Export class list as .xlsx or .docx

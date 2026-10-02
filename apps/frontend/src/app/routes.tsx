@@ -6,6 +6,7 @@ import { LoginScreen } from "./screens/shared/LoginScreen";
 import { NotFoundScreen } from "./screens/shared/NotFoundScreen";
 import { NotificationCenter } from "./screens/shared/NotificationCenter";
 import { ProfileSettings } from "./screens/shared/ProfileSettings";
+import { StudentManagement } from "./screens/shared/StudentManagement";
 import { UnauthorizedScreen } from "./screens/shared/UnauthorizedScreen";
 
 // Super Admin screens
@@ -200,6 +201,10 @@ export const router = createBrowserRouter([
       },
 
       // Shared routes
+      {
+        path: "students",
+        Component: StudentManagement,
+      },
       {
         path: "profile",
         Component: ProfileSettings,

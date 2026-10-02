@@ -31,3 +31,7 @@ Thumbs.db
 
 # Build/deploy artifacts
 *.zip
+
+# Local database
+.pgdata/
+

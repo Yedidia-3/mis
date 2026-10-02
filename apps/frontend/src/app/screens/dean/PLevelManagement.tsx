@@ -18,9 +18,10 @@ interface PLevel {
   id: number;
   name: string;
   academic_year_id: number;
-  classes: { id: number; students?: any[]; student_count?: number }[];
+  classes: { id: number; students?: any[]; student_count?: number; pending_imported_count?: number }[];
   class_count?: number;
   student_count?: number;
+  pending_imported_count?: number;
   is_distributed?: boolean;
   any_distributed?: boolean;
 }
@@ -157,6 +158,16 @@ export function PLevelManagement() {
                           style={{ backgroundColor: status.bg, color: status.color }}>
                           {status.label}
                         </span>
+                        {Number(pl.pending_imported_count || 0) > 0 && (
+                          <span
+                            className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold shadow-xs cursor-pointer animate-pulse"
+                            style={{ backgroundColor: '#FEF3C7', color: '#B45309', border: '1px solid #FCD34D' }}
+                            title={`${pl.pending_imported_count} imported student(s) pending review`}
+                            onClick={() => navigate(`${routePrefix}/p-levels/${pl.id}/classes`)}
+                          >
+                            ⚠️ Imported! ({pl.pending_imported_count})
+                          </span>
+                        )}
                       </div>
                       {!isPrincipal && (
                         <DropdownMenu>

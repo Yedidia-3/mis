@@ -44,12 +44,14 @@ const navItems = {
   super_admin: [
     { icon: LayoutDashboard, label: "Dashboard",     path: "/admin/dashboard" },
     { icon: Users,           label: "Users",         path: "/admin/users" },
+    { icon: GraduationCap,   label: "Students",      path: "/students" },
     { icon: FileText,        label: "Audit Log",     path: "/admin/audit-log" },
     { icon: GraduationCap,   label: "Academic Year", path: "/admin/academic-year" },
   ],
   dean: [
     { icon: LayoutDashboard, label: "Dashboard",    path: "/dean/dashboard" },
     { icon: GraduationCap,   label: "P-Levels",     path: "/dean/p-levels" },
+    { icon: Users,           label: "Students",     path: "/students" },
     { icon: FileText,        label: "Import Data",  path: "/dean/import" },
     { icon: Users,           label: "Distribution", path: "/dean/distribution" },
     { icon: BookOpen,        label: "Courses",      path: "/dean/courses" },
@@ -58,14 +60,17 @@ const navItems = {
     { icon: LayoutDashboard, label: "Dashboard",         path: "/principal/dashboard" },
     { icon: ClipboardCheck,  label: "Pending Approvals", path: "/principal/approvals" },
     { icon: GraduationCap,   label: "P-Levels",          path: "/principal/p-levels" },
+    { icon: Users,           label: "Students",          path: "/students" },
   ],
   teacher: [
     { icon: LayoutDashboard, label: "Dashboard",          path: "/teacher/dashboard" },
     { icon: BookOpen,        label: "My Classes",         path: "/teacher/my-classes" },
+    { icon: Users,           label: "Students",           path: "/students" },
     { icon: ClipboardCheck,  label: "Attendance History", path: "/teacher/attendance-history" },
   ],
   accountant: [
     { icon: LayoutDashboard, label: "Dashboard",   path: "/accountant/dashboard" },
+    { icon: Users,           label: "Students",    path: "/students" },
     { icon: BookOpen,        label: "Class Lists", path: "/accountant/class-lists" },
     { icon: DollarSign,      label: "Enrollments", path: "/accountant/enrollment" },
     { icon: Settings,        label: "Zones",       path: "/accountant/zones" },
@@ -81,7 +86,9 @@ function isPathAllowedForRole(pathname: string, role: string): boolean {
     pathname === "/profile" ||
     pathname === "/notifications" ||
     pathname === "/change-password" ||
-    pathname === "/403"
+    pathname === "/403" ||
+    pathname === "/students" ||
+    pathname.startsWith("/students/")
   ) {
     return true;
   }

@@ -1,7 +1,8 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import * as ExcelJS from 'exceljs';
-import { Repository } from 'typeorm';
+import { Readable } from 'stream';
+import { In, Repository } from 'typeorm';
 import { AcademicYear } from '../entities/academic-year.entity';
 import { AttendanceSession } from '../entities/attendance-session.entity';
 import { Attendance } from '../entities/attendance.entity';
@@ -55,7 +56,8 @@ export class AcademicsService {
     const plIds = plevels.map((p: any) => p.id);
     const classes = await this.classRepo.query(
       `SELECT c.id, c.name, c.p_level_id, c.teacher_id, c.distributed_at,
-              (SELECT COUNT(*) FROM students s WHERE s.current_class_id = c.id) AS student_count
+              (SELECT COUNT(*) FROM students s WHERE s.current_class_id = c.id) AS student_count,
+              (SELECT COUNT(*) FROM students s WHERE s.current_class_id = c.id AND s.approval_status = 'pending') AS pending_imported_count
        FROM classes c
        WHERE c.p_level_id = ANY($1) AND c.status = 'active'
        ORDER BY c.name ASC`,
@@ -71,6 +73,7 @@ export class AcademicsService {
         teacher_id: c.teacher_id,
         distributed_at: c.distributed_at,
         student_count: Number(c.student_count ?? 0),
+        pending_imported_count: Number(c.pending_imported_count ?? 0),
       });
     }
 
@@ -81,6 +84,7 @@ export class AcademicsService {
         classes: cls,
         class_count: cls.length,
         student_count: cls.reduce((s: number, c: any) => s + c.student_count, 0),
+        pending_imported_count: cls.reduce((s: number, c: any) => s + (c.pending_imported_count ?? 0), 0),
         is_distributed: cls.length > 0 && cls.every((c: any) => c.distributed_at),
         any_distributed: cls.some((c: any) => c.distributed_at),
       };
@@ -113,11 +117,12 @@ export class AcademicsService {
   // ─── Classes ─────────────────────────────────────────────────────────────────
 
   async listClasses(pLevelId: number) {
-    // Raw SQL — reliable student counts + teacher name + distribution status.
+    // Raw SQL — reliable student counts + teacher name + distribution status + pending imported count.
     const rows = await this.classRepo.query(
       `SELECT c.id, c.name, c.p_level_id, c.teacher_id, c.status, c.distributed_at,
               t.name AS teacher_name,
-              (SELECT COUNT(*) FROM students s WHERE s.current_class_id = c.id) AS student_count
+              (SELECT COUNT(*) FROM students s WHERE s.current_class_id = c.id) AS student_count,
+              (SELECT COUNT(*) FROM students s WHERE s.current_class_id = c.id AND s.approval_status = 'pending') AS pending_imported_count
        FROM classes c
        LEFT JOIN users t ON t.id = c.teacher_id
        WHERE c.p_level_id = $1 AND c.status = 'active'
@@ -133,6 +138,7 @@ export class AcademicsService {
       distributed_at: c.distributed_at,
       teacher: c.teacher_id ? { id: c.teacher_id, name: c.teacher_name } : null,
       student_count: Number(c.student_count ?? 0),
+      pending_imported_count: Number(c.pending_imported_count ?? 0),
     }));
   }
 
@@ -176,6 +182,134 @@ export class AcademicsService {
 
   // ─── Students ────────────────────────────────────────────────────────────────
 
+  async listStudents(params: {
+    academicYearId?: number;
+    pLevelId?: number;
+    classId?: number;
+    search?: string;
+    status?: string;
+    page?: number;
+    limit?: number;
+  }) {
+    const qb = this.studentRepo.createQueryBuilder('s')
+      .leftJoinAndSelect('s.current_class', 'c')
+      .leftJoinAndSelect('c.p_level', 'pl')
+      .leftJoinAndSelect('s.academic_year', 'ay')
+      .leftJoinAndSelect('s.imported_by_user', 'ibu')
+      .leftJoinAndSelect('s.approved_by_user', 'abu');
+
+    if (params.academicYearId) {
+      qb.andWhere('s.academic_year_id = :yearId', { yearId: params.academicYearId });
+    } else {
+      qb.andWhere(
+        's.academic_year_id = COALESCE((SELECT id FROM academic_years WHERE status = \'active\' ORDER BY created_at DESC LIMIT 1), s.academic_year_id)'
+      );
+    }
+
+    if (params.pLevelId) {
+      qb.andWhere('c.p_level_id = :plId', { plId: params.pLevelId });
+    }
+
+    if (params.classId) {
+      qb.andWhere('s.current_class_id = :classId', { classId: params.classId });
+    }
+
+    if (params.status) {
+      qb.andWhere('s.status = :status', { status: params.status });
+    }
+
+    if (params.search && params.search.trim()) {
+      const term = `%${params.search.trim().toLowerCase()}%`;
+      qb.andWhere(
+        '(LOWER(s.name) LIKE :term OR LOWER(COALESCE(s.student_id_number, \'\')) LIKE :term OR LOWER(COALESCE(c.name, \'\')) LIKE :term)',
+        { term }
+      );
+    }
+
+    qb.orderBy('pl.name', 'ASC')
+      .addOrderBy('c.name', 'ASC')
+      .addOrderBy('s.rank', 'ASC', 'NULLS LAST')
+      .addOrderBy('s.name', 'ASC');
+
+    const page = params.page ? Math.max(1, Number(params.page)) : 1;
+    const limit = params.limit ? Math.min(2000, Math.max(1, Number(params.limit))) : 500;
+    qb.skip((page - 1) * limit).take(limit);
+
+    const [students, total] = await qb.getManyAndCount();
+
+    return {
+      data: students.map((s) => ({
+        id: s.id,
+        student_id_number: s.student_id_number,
+        name: s.name,
+        academic_year_id: s.academic_year_id,
+        academic_year_name: s.academic_year?.name,
+        current_class_id: s.current_class_id,
+        class_name: s.current_class?.name,
+        p_level_id: s.current_class?.p_level_id,
+        p_level_name: s.current_class?.p_level?.name,
+        former_class: s.former_class,
+        rank: s.rank,
+        marks_percentage: s.marks_percentage,
+        status: s.status,
+        is_imported: s.is_imported,
+        approval_status: s.approval_status,
+        imported_at: s.imported_at,
+        imported_by_user_id: s.imported_by_user_id,
+        imported_by: s.imported_by_user ? {
+          id: s.imported_by_user.id,
+          name: s.imported_by_user.name,
+          email: s.imported_by_user.email,
+          role: s.imported_by_user.role,
+        } : null,
+        approved_by_user_id: s.approved_by_user_id,
+        approved_at: s.approved_at,
+        created_at: s.created_at,
+        updated_at: s.updated_at,
+      })),
+      total,
+      page,
+      limit,
+    };
+  }
+
+  async getStudent(studentId: number) {
+    const student = await this.studentRepo.findOne({
+      where: { id: studentId },
+      relations: ['current_class', 'current_class.p_level', 'academic_year', 'imported_by_user', 'approved_by_user'],
+    });
+    if (!student) throw new NotFoundException('Student not found');
+    return {
+      id: student.id,
+      student_id_number: student.student_id_number,
+      name: student.name,
+      academic_year_id: student.academic_year_id,
+      academic_year_name: student.academic_year?.name,
+      current_class_id: student.current_class_id,
+      class_name: student.current_class?.name,
+      p_level_id: student.current_class?.p_level_id,
+      p_level_name: student.current_class?.p_level?.name,
+      former_class: student.former_class,
+      rank: student.rank,
+      marks_percentage: student.marks_percentage,
+      status: student.status,
+      is_imported: student.is_imported,
+      approval_status: student.approval_status,
+      imported_at: student.imported_at,
+      imported_by_user_id: student.imported_by_user_id,
+      imported_by: student.imported_by_user ? {
+        id: student.imported_by_user.id,
+        name: student.imported_by_user.name,
+        email: student.imported_by_user.email,
+        role: student.imported_by_user.role,
+      } : null,
+      approved_by_user_id: student.approved_by_user_id,
+      approved_at: student.approved_at,
+      created_at: student.created_at,
+      updated_at: student.updated_at,
+    };
+  }
+
   async getStudentsByClass(classId: number) {
     return this.studentRepo.find({
       where: { current_class_id: classId },
@@ -185,7 +319,7 @@ export class AcademicsService {
 
   async addStudentsToClass(
     classId: number,
-    students: Array<{ name?: string; former_class?: string; rank?: number | string; marks_percentage?: number | string }>,
+    students: Array<{ name?: string; student_id_number?: string; former_class?: string; rank?: number | string; marks_percentage?: number | string }>,
   ) {
     const cls = await this.classRepo.findOne({ where: { id: classId } });
     if (!cls) throw new NotFoundException('Class not found');
@@ -209,6 +343,7 @@ export class AcademicsService {
 
         return {
           name,
+          student_id_number: s?.student_id_number ? String(s.student_id_number).trim() : null,
           former_class: formerClass,
           rank: Number.isFinite(rankValue) ? rankValue : null,
           marks_percentage: marksValue,
@@ -227,6 +362,7 @@ export class AcademicsService {
 
     const studentRows = deduped.map((entry) => this.studentRepo.create({
       name: entry.name,
+      student_id_number: entry.student_id_number,
       academic_year_id: pLevel.academic_year_id,
       current_class_id: classId,
       former_class: entry.former_class,
@@ -242,9 +378,81 @@ export class AcademicsService {
     };
   }
 
+  async createStudent(
+    dto: {
+      name: string;
+      student_id_number?: string;
+      academic_year_id?: number;
+      class_id?: number;
+      p_level_id?: number;
+      former_class?: string;
+      rank?: number | string;
+      marks_percentage?: number | string;
+      status?: string;
+    },
+    user?: User,
+  ) {
+    const name = String(dto.name ?? '').trim();
+    if (!name) throw new BadRequestException('Student name is required');
+
+    let yearId = dto.academic_year_id;
+    if (!yearId) {
+      const activeYear = await this.yearRepo.findOne({ where: { status: 'active' }, order: { created_at: 'DESC' } });
+      if (!activeYear) throw new BadRequestException('No active academic year found. Please create one first.');
+      yearId = activeYear.id;
+    }
+
+    const year = await this.yearRepo.findOne({ where: { id: yearId } });
+    if (!year) throw new NotFoundException('Academic year not found');
+
+    let classId = dto.class_id ? Number(dto.class_id) : null;
+    if (!classId && dto.p_level_id) {
+      const defaultCls = await this.classRepo.findOne({ where: { p_level_id: dto.p_level_id, status: 'active' }, order: { name: 'ASC' } });
+      if (defaultCls) classId = defaultCls.id;
+    }
+
+    const studentIdNumber = dto.student_id_number ? String(dto.student_id_number).trim() : null;
+
+    if (studentIdNumber) {
+      const dup = await this.studentRepo.findOne({ where: { academic_year_id: yearId, student_id_number: studentIdNumber } });
+      if (dup) throw new BadRequestException(`Student with ID ${studentIdNumber} already exists in ${year.name}`);
+    }
+
+    const newStudent = this.studentRepo.create({
+      name,
+      student_id_number: studentIdNumber,
+      academic_year_id: yearId,
+      current_class_id: classId,
+      former_class: dto.former_class?.trim() || null,
+      rank: dto.rank !== undefined && Number.isFinite(Number(dto.rank)) ? Number(dto.rank) : null,
+      marks_percentage: dto.marks_percentage !== undefined ? this.parseMarks(dto.marks_percentage) : null,
+      status: (dto.status as any) || 'active',
+    });
+
+    const saved = await this.studentRepo.save(newStudent);
+
+    const uName = user?.name || 'A user';
+    await this.notificationsService.notifyRoles(
+      ['dean'],
+      `${uName} registered new student: "${saved.name}" (ID: ${saved.student_id_number || 'N/A'}) in ${year.name}.`,
+      'info',
+      `/students?academic_year_id=${yearId}`,
+    );
+
+    return this.getStudent(saved.id);
+  }
+
   async updateStudent(
     studentId: number,
-    updates: { name?: string; former_class?: string | null; rank?: number | string | null; marks_percentage?: number | string | null },
+    updates: {
+      name?: string;
+      student_id_number?: string | null;
+      current_class_id?: number | null;
+      former_class?: string | null;
+      rank?: number | string | null;
+      marks_percentage?: number | string | null;
+      status?: string;
+    },
   ) {
     const student = await this.studentRepo.findOne({ where: { id: studentId } });
     if (!student) throw new NotFoundException('Student not found');
@@ -253,6 +461,14 @@ export class AcademicsService {
       const name = String(updates.name ?? '').trim();
       if (!name) throw new BadRequestException('Student name is required');
       student.name = name;
+    }
+
+    if (updates.student_id_number !== undefined) {
+      student.student_id_number = updates.student_id_number ? String(updates.student_id_number).trim() : null;
+    }
+
+    if (updates.current_class_id !== undefined) {
+      student.current_class_id = updates.current_class_id ? Number(updates.current_class_id) : null;
     }
 
     if (updates.former_class !== undefined) {
@@ -276,7 +492,27 @@ export class AcademicsService {
         : this.parseMarks(updates.marks_percentage);
     }
 
-    return this.studentRepo.save(student);
+    if (updates.status !== undefined && ['active', 'repeating', 'promoted', 'transferred'].includes(updates.status)) {
+      student.status = updates.status as any;
+    }
+
+    await this.studentRepo.save(student);
+    return this.getStudent(student.id);
+  }
+
+  async deleteStudent(studentId: number) {
+    const student = await this.studentRepo.findOne({ where: { id: studentId } });
+    if (!student) throw new NotFoundException('Student not found');
+    await this.studentRepo.delete(studentId);
+    return { success: true, message: `Student "${student.name}" deleted successfully` };
+  }
+
+  async deleteStudentsBulk(ids: number[]) {
+    if (!ids || !ids.length) throw new BadRequestException('No student IDs provided');
+    const validIds = ids.map(Number).filter(Number.isFinite);
+    if (!validIds.length) throw new BadRequestException('Invalid student IDs');
+    await this.studentRepo.delete(validIds);
+    return { success: true, message: `Deleted ${validIds.length} student(s) successfully` };
   }
 
   async getStudentCountForPLevel(pLevelId: number, academicYearId: number) {
@@ -298,6 +534,458 @@ export class AcademicsService {
     if (!student) throw new NotFoundException('Student not found');
     student.current_class_id = newClassId;
     return this.studentRepo.save(student);
+  }
+
+  /**
+   * Helper to parse P-level and Class name from strings like:
+   * "P1 A", "P1A", "P2 c", "P3 D", "A", etc.
+   */
+  private parsePLevelAndClass(
+    rawClassStr: string | null | undefined,
+    rawSheetName: string | null | undefined,
+    fallbackPLevelName?: string,
+  ): { pLevelName: string; className: string } {
+    const classStr = String(rawClassStr ?? '').trim();
+    const sheetName = String(rawSheetName ?? '').trim();
+
+    // 1. Try matching classStr as "P1 A", "P1A", "P1-A", "P 1 A", "Primary 1 A"
+    const fullMatch = classStr.match(/^(?:primary\s*|p\s*)?(\d+)\s*[-_/]?\s*([a-zA-Z0-9]+)$/i);
+    if (fullMatch) {
+      return {
+        pLevelName: `P${fullMatch[1]}`,
+        className: fullMatch[2].toUpperCase(),
+      };
+    }
+
+    // 2. Check if sheetName is "P1", "P2", etc.
+    const sheetPLevelMatch = sheetName.match(/^(?:primary\s*|p\s*)?(\d+)$/i);
+    const detectedSheetPLevel = sheetPLevelMatch ? `P${sheetPLevelMatch[1]}` : null;
+
+    // 3. Check if sheetName is "P1 A", "P1A", "P1-A"
+    const sheetFullMatch = sheetName.match(/^(?:primary\s*|p\s*)?(\d+)\s*[-_/]?\s*([a-zA-Z0-9]+)$/i);
+    if (sheetFullMatch) {
+      return {
+        pLevelName: `P${sheetFullMatch[1]}`,
+        className: classStr ? classStr.toUpperCase() : sheetFullMatch[2].toUpperCase(),
+      };
+    }
+
+    // 4. If classStr is a single stream letter like "A", "B", "C"
+    if (/^[a-zA-Z]$/.test(classStr)) {
+      const pLevel = detectedSheetPLevel || fallbackPLevelName || 'P1';
+      return {
+        pLevelName: pLevel.toUpperCase(),
+        className: classStr.toUpperCase(),
+      };
+    }
+
+    // 5. If sheetName is a single stream letter like "A", "B", "C"
+    if (/^[a-zA-Z]$/.test(sheetName)) {
+      const pLevel = fallbackPLevelName || 'P1';
+      return {
+        pLevelName: pLevel.toUpperCase(),
+        className: sheetName.toUpperCase(),
+      };
+    }
+
+    // 6. If classStr starts with P-level or just has digits
+    if (classStr) {
+      const pMatch = classStr.match(/(?:p|primary)\s*(\d)/i);
+      const pLevel = pMatch ? `P${pMatch[1]}` : (detectedSheetPLevel || fallbackPLevelName || 'P1');
+      return {
+        pLevelName: pLevel.toUpperCase(),
+        className: classStr.toUpperCase(),
+      };
+    }
+
+    // 7. Fallback
+    return {
+      pLevelName: (detectedSheetPLevel || fallbackPLevelName || 'P1').toUpperCase(),
+      className: 'A',
+    };
+  }
+
+  async importStudentsUniversal(
+    fileBuffer: Buffer,
+    fileName: string,
+    options: {
+      academicYearId?: number;
+      pLevelId?: number;
+      classId?: number;
+      dryRun?: boolean;
+    } = {},
+    user?: User,
+  ) {
+    const workbook = new ExcelJS.Workbook();
+    const isCsv = fileName.toLowerCase().endsWith('.csv');
+
+    if (isCsv) {
+      await workbook.csv.read(Readable.from(fileBuffer));
+    } else {
+      try {
+        await workbook.xlsx.load(fileBuffer as any);
+      } catch (err) {
+        await workbook.csv.read(Readable.from(fileBuffer));
+      }
+    }
+
+    if (!workbook.worksheets.length) {
+      throw new BadRequestException('No sheets found in uploaded file');
+    }
+
+    // Determine default academic year
+    let defaultYear = options.academicYearId
+      ? await this.yearRepo.findOne({ where: { id: options.academicYearId } })
+      : await this.yearRepo.findOne({ where: { status: 'active' }, order: { created_at: 'DESC' } });
+
+    if (!defaultYear) {
+      defaultYear = this.yearRepo.create({ name: '2026/27', status: 'active' });
+      defaultYear = await this.yearRepo.save(defaultYear);
+    }
+
+    let fallbackPLevelName: string | undefined;
+    if (options.pLevelId) {
+      const pl = await this.pLevelRepo.findOne({ where: { id: options.pLevelId } });
+      if (pl) fallbackPLevelName = pl.name;
+    }
+
+    // Caches to speed up processing
+    const yearCache = new Map<string, AcademicYear>();
+    yearCache.set(defaultYear.name.trim().toLowerCase(), defaultYear);
+    yearCache.set(String(defaultYear.id), defaultYear);
+
+    const pLevelCache = new Map<string, PLevel>(); // `${yearId}:${pLevelName.toUpperCase()}`
+    const classCache = new Map<string, Class>();   // `${pLevelId}:${className.toUpperCase()}`
+
+    // Preload existing P-Levels and Classes for defaultYear to prevent race conditions and duplicate creation
+    const existingPLevels = await this.pLevelRepo.find({
+      where: { academic_year_id: defaultYear.id, status: 'active' },
+    });
+    for (const pl of existingPLevels) {
+      pLevelCache.set(`${defaultYear.id}:${pl.name.toUpperCase().trim()}`, pl);
+    }
+
+    const existingClasses = await this.classRepo.find({
+      where: { status: 'active' },
+    });
+    for (const c of existingClasses) {
+      classCache.set(`${c.p_level_id}:${c.name.toUpperCase().trim()}`, c);
+    }
+
+    const getOrCreatePLevel = async (year: AcademicYear, plName: string): Promise<PLevel> => {
+      const normName = plName.toUpperCase().trim();
+      const key = `${year.id}:${normName}`;
+      if (pLevelCache.has(key)) return pLevelCache.get(key)!;
+
+      let pl = await this.pLevelRepo.findOne({
+        where: { academic_year_id: year.id, name: normName, status: 'active' },
+      });
+      if (!pl) {
+        pl = this.pLevelRepo.create({
+          name: normName,
+          academic_year_id: year.id,
+          status: 'active',
+        });
+        pl = await this.pLevelRepo.save(pl);
+      }
+      pLevelCache.set(key, pl);
+      return pl;
+    };
+
+    const getOrCreateClass = async (pLevel: PLevel, rawClsName: string): Promise<Class> => {
+      let normCls = rawClsName.trim();
+      const prefixRegex = new RegExp(`^${pLevel.name}\\s*[-_]?\\s*`, 'i');
+      if (prefixRegex.test(normCls)) {
+        normCls = normCls.replace(prefixRegex, '').trim();
+      }
+      normCls = normCls.toUpperCase();
+      if (!normCls) normCls = 'A';
+
+      const key = `${pLevel.id}:${normCls}`;
+      const fullNameKey = `${pLevel.id}:${pLevel.name} ${normCls}`;
+      if (classCache.has(key)) return classCache.get(key)!;
+      if (classCache.has(fullNameKey)) return classCache.get(fullNameKey)!;
+
+      let cls = await this.classRepo.findOne({
+        where: [
+          { p_level_id: pLevel.id, name: normCls, status: 'active' },
+          { p_level_id: pLevel.id, name: `${pLevel.name} ${normCls}`, status: 'active' },
+        ],
+      });
+      if (!cls) {
+        cls = this.classRepo.create({
+          name: normCls,
+          p_level_id: pLevel.id,
+          status: 'active',
+        });
+        cls = await this.classRepo.save(cls);
+      }
+      classCache.set(key, cls);
+      classCache.set(fullNameKey, cls);
+      return cls;
+    };
+
+    // Preload existing students for default year for instant deduplication
+    const existingStudents = await this.studentRepo.find({
+      where: { academic_year_id: defaultYear.id },
+    });
+    const byIdNumber = new Map<string, Student>();
+    const byCleanNameAndClass = new Map<string, Student>();
+    const byCleanName = new Map<string, Student>();
+
+    for (const s of existingStudents) {
+      if (s.student_id_number && s.student_id_number.trim()) {
+        byIdNumber.set(s.student_id_number.trim().toLowerCase(), s);
+      }
+      const cName = s.name.trim().toLowerCase().replace(/\s+/g, ' ');
+      byCleanName.set(cName, s);
+      if (s.current_class_id) {
+        byCleanNameAndClass.set(`${s.current_class_id}:${cName}`, s);
+      }
+    }
+
+    const studentsToCreate: Student[] = [];
+    const studentsToUpdate: Student[] = [];
+    let unchangedCount = 0;
+    const warnings: string[] = [];
+    const classesAffected = new Set<string>();
+    const pLevelsAffected = new Set<string>();
+
+    for (const sheet of workbook.worksheets) {
+      const rawSheetName = sheet.name.trim();
+
+      // Find header row in first 5 rows
+      let headerRowIndex = -1;
+      const colMap = {
+        studentId: -1,
+        name: -1,
+        academicYear: -1,
+        class: -1,
+        rank: -1,
+        marks: -1,
+        formerClass: -1,
+      };
+
+      sheet.eachRow((row, rowNum) => {
+        if (headerRowIndex !== -1 || rowNum > 5) return;
+        const values = (row.values as any[]) || [];
+        for (let c = 1; c < values.length; c++) {
+          const header = String(values[c] ?? '').trim().toLowerCase();
+          if (!header) continue;
+          if (['student id', 'student_id', 'studentid', 'id', 'reg no', 'reg_no', 'reg number', 'registration number', 'code'].includes(header)) {
+            colMap.studentId = c;
+          } else if (['name', 'student name', 'full name', 'fullname', 'names', 'nom'].includes(header)) {
+            colMap.name = c;
+          } else if (['academic year', 'academic_year', 'academicyear', 'year', 'ay', 'annee'].includes(header)) {
+            colMap.academicYear = c;
+          } else if (['class', 'classe', 'section', 'grade', 'stream', 'class name'].includes(header)) {
+            colMap.class = c;
+          } else if (['rank', 'position'].includes(header)) {
+            colMap.rank = c;
+          } else if (['marks', 'marks %', 'marks percentage', 'marks_percentage', 'score', 'percentage'].includes(header)) {
+            colMap.marks = c;
+          } else if (['former class', 'former_class', 'previous class'].includes(header)) {
+            colMap.formerClass = c;
+          }
+        }
+        if (colMap.name !== -1) {
+          headerRowIndex = rowNum;
+        }
+      });
+
+      if (headerRowIndex === -1) {
+        headerRowIndex = 1;
+        colMap.studentId = 1;
+        colMap.name = 2;
+        colMap.academicYear = 3;
+        colMap.class = 4;
+      }
+
+      // Collect rows to process sequentially
+      const sheetRows: Array<{
+        rowNum: number;
+        name: string;
+        studentIdNumber?: string;
+        academicYearName?: string;
+        classVal: string;
+        rank?: number;
+        marks: number | null;
+        formerClass?: string;
+      }> = [];
+
+      sheet.eachRow((row, rowNum) => {
+        if (rowNum <= headerRowIndex) return;
+
+        const rawName = colMap.name !== -1 ? row.getCell(colMap.name).value : null;
+        const name = String(rawName ?? '').trim().replace(/\s+/g, ' ');
+        if (!name) return;
+
+        const rawId = colMap.studentId !== -1 ? row.getCell(colMap.studentId).value : null;
+        const studentIdNumber = rawId !== null && rawId !== undefined && String(rawId).trim() !== ''
+          ? String(rawId).trim()
+          : undefined;
+
+        const rawYear = colMap.academicYear !== -1 ? row.getCell(colMap.academicYear).value : null;
+        const academicYearName = rawYear ? String(rawYear).trim() : undefined;
+
+        const rawClass = colMap.class !== -1 ? row.getCell(colMap.class).value : null;
+        const classVal = rawClass ? String(rawClass).trim() : '';
+
+        const rawRank = colMap.rank !== -1 ? row.getCell(colMap.rank).value : null;
+        const rank = rawRank && Number.isFinite(Number(rawRank)) ? Number(rawRank) : undefined;
+
+        const rawMarks = colMap.marks !== -1 ? row.getCell(colMap.marks).value : null;
+        const marks = this.parseMarks(rawMarks);
+
+        const rawFormer = colMap.formerClass !== -1 ? row.getCell(colMap.formerClass).value : null;
+        const formerClass = rawFormer ? String(rawFormer).trim() : undefined;
+
+        sheetRows.push({
+          rowNum,
+          name,
+          studentIdNumber,
+          academicYearName,
+          classVal,
+          rank,
+          marks,
+          formerClass,
+        });
+      });
+
+      for (const item of sheetRows) {
+        const { pLevelName, className } = this.parsePLevelAndClass(item.classVal, rawSheetName, fallbackPLevelName);
+
+        let targetYear = defaultYear!;
+        if (item.academicYearName) {
+          const yrKey = item.academicYearName.toLowerCase().trim();
+          if (yearCache.has(yrKey)) {
+            targetYear = yearCache.get(yrKey)!;
+          } else {
+            let foundYear = await this.yearRepo.findOne({
+              where: [{ name: item.academicYearName }, { name: item.academicYearName.replace('/', '-') }],
+            });
+            if (!foundYear) {
+              foundYear = this.yearRepo.create({ name: item.academicYearName, status: 'active' });
+              foundYear = await this.yearRepo.save(foundYear);
+            }
+            yearCache.set(yrKey, foundYear);
+            targetYear = foundYear;
+          }
+        }
+
+        const pLevel = await getOrCreatePLevel(targetYear, pLevelName);
+        const targetClass = await getOrCreateClass(pLevel, className);
+
+        classesAffected.add(`${pLevel.name} ${targetClass.name}`);
+        pLevelsAffected.add(pLevel.name);
+
+        const cleanName = item.name.toLowerCase().trim().replace(/\s+/g, ' ');
+        const cleanId = item.studentIdNumber ? item.studentIdNumber.toLowerCase().trim() : null;
+
+        let existing: Student | undefined;
+        if (cleanId && byIdNumber.has(cleanId)) {
+          existing = byIdNumber.get(cleanId);
+        } else if (byCleanNameAndClass.has(`${targetClass.id}:${cleanName}`)) {
+          existing = byCleanNameAndClass.get(`${targetClass.id}:${cleanName}`);
+        } else if (byCleanName.has(cleanName)) {
+          existing = byCleanName.get(cleanName);
+        }
+
+        if (existing) {
+          let changed = false;
+          if (existing.current_class_id !== targetClass.id) {
+            existing.current_class_id = targetClass.id;
+            changed = true;
+          }
+          if (item.studentIdNumber && !existing.student_id_number) {
+            existing.student_id_number = item.studentIdNumber;
+            byIdNumber.set(cleanId!, existing);
+            changed = true;
+          }
+          if (item.rank !== undefined && existing.rank !== item.rank) {
+            existing.rank = item.rank;
+            changed = true;
+          }
+          if (item.marks !== null && existing.marks_percentage !== item.marks) {
+            existing.marks_percentage = item.marks;
+            changed = true;
+          }
+          if (item.formerClass && existing.former_class !== item.formerClass) {
+            existing.former_class = item.formerClass;
+            changed = true;
+          }
+          if (changed) {
+            studentsToUpdate.push(existing);
+          } else {
+            unchangedCount++;
+          }
+        } else {
+          const newStudent = this.studentRepo.create({
+            name: item.name,
+            student_id_number: item.studentIdNumber || null,
+            academic_year_id: targetYear.id,
+            current_class_id: targetClass.id,
+            former_class: item.formerClass || null,
+            rank: item.rank || null,
+            marks_percentage: item.marks ?? null,
+            status: 'active',
+            is_imported: true,
+            approval_status: 'pending',
+            imported_by_user_id: user ? user.id : null,
+            imported_at: new Date(),
+          });
+          studentsToCreate.push(newStudent);
+          if (cleanId) byIdNumber.set(cleanId, newStudent);
+          byCleanName.set(cleanName, newStudent);
+          byCleanNameAndClass.set(`${targetClass.id}:${cleanName}`, newStudent);
+        }
+      }
+    }
+
+    const totalRows = studentsToCreate.length + studentsToUpdate.length + unchangedCount;
+
+    if (!options.dryRun) {
+      if (studentsToCreate.length > 0) {
+        await this.studentRepo.save(studentsToCreate, { chunk: 100 });
+      }
+      if (studentsToUpdate.length > 0) {
+        await this.studentRepo.save(studentsToUpdate, { chunk: 100 });
+      }
+
+      // SINGLE RULE:
+      // "the single rule is that when imported who ever was not existing, it should send notification to dean"
+      if (studentsToCreate.length > 0) {
+        const preview = studentsToCreate.slice(0, 3).map((s) => s.name).join(', ') +
+          (studentsToCreate.length > 3 ? ` and ${studentsToCreate.length - 3} more` : '');
+        const uName = user?.name || 'A user';
+        const notificationMsg = `${uName} imported ${studentsToCreate.length} new student(s) (${preview}) into ${defaultYear.name}.`;
+        await this.notificationsService.notifyRoles(
+          ['dean'],
+          notificationMsg,
+          'info',
+          `/students?academic_year_id=${defaultYear.id}`,
+        );
+      }
+    }
+
+    return {
+      success: true,
+      total_rows: totalRows,
+      new_count: studentsToCreate.length,
+      updated_count: studentsToUpdate.length,
+      unchanged_count: unchangedCount,
+      new_students: studentsToCreate.map((s) => ({
+        id: s.id,
+        name: s.name,
+        student_id_number: s.student_id_number,
+      })),
+      classes_affected: Array.from(classesAffected).sort(),
+      p_levels_affected: Array.from(pLevelsAffected).sort(),
+      message: options.dryRun
+        ? `Preview: ${studentsToCreate.length} new student(s), ${studentsToUpdate.length} updated, ${unchangedCount} already up to date.`
+        : `Import successful: ${studentsToCreate.length} new student(s) added, ${studentsToUpdate.length} updated, ${unchangedCount} verified with zero duplicates.`,
+      warnings,
+    };
   }
 
   // ─── Excel Import ─────────────────────────────────────────────────────────────
@@ -434,10 +1122,197 @@ export class AcademicsService {
   }
 
   async getClassStudents(classId: number) {
-    return this.studentRepo.find({
+    const students = await this.studentRepo.find({
       where: { current_class_id: classId },
-      order: { rank: 'ASC' },
+      relations: ['imported_by_user'],
+      order: { rank: 'ASC', name: 'ASC' },
     });
+    return students.map((s) => ({
+      id: s.id,
+      student_id_number: s.student_id_number,
+      name: s.name,
+      academic_year_id: s.academic_year_id,
+      current_class_id: s.current_class_id,
+      former_class: s.former_class,
+      rank: s.rank,
+      marks_percentage: s.marks_percentage,
+      status: s.status,
+      is_imported: s.is_imported,
+      approval_status: s.approval_status,
+      imported_at: s.imported_at,
+      imported_by_user_id: s.imported_by_user_id,
+      imported_by: s.imported_by_user ? {
+        id: s.imported_by_user.id,
+        name: s.imported_by_user.name,
+        email: s.imported_by_user.email,
+        role: s.imported_by_user.role,
+      } : null,
+      approved_by_user_id: s.approved_by_user_id,
+      approved_at: s.approved_at,
+      created_at: s.created_at,
+      updated_at: s.updated_at,
+    }));
+  }
+
+  private async checkAndUpdateClassDistributedStatus(classIds: number[]) {
+    const validClassIds = [...new Set(classIds.filter(Boolean))];
+    for (const classId of validClassIds) {
+      const pendingCount = await this.studentRepo.count({
+        where: { current_class_id: classId, approval_status: 'pending' },
+      });
+      if (pendingCount === 0) {
+        await this.classRepo.query(
+          `UPDATE classes SET distributed_at = COALESCE(distributed_at, NOW()) WHERE id = $1`,
+          [classId],
+        );
+      }
+    }
+  }
+
+  async approveStudent(studentId: number, user: User) {
+    const student = await this.studentRepo.findOne({
+      where: { id: studentId },
+      relations: ['current_class'],
+    });
+    if (!student) throw new NotFoundException('Student not found');
+
+    student.approval_status = 'approved';
+    student.approved_by_user_id = user.id;
+    student.approved_at = new Date();
+    await this.studentRepo.save(student);
+
+    if (student.current_class_id) {
+      await this.checkAndUpdateClassDistributedStatus([student.current_class_id]);
+    }
+
+    if (student.imported_by_user_id && student.imported_by_user_id !== user.id) {
+      const className = student.current_class?.name ? ` in class ${student.current_class.name}` : '';
+      await this.notificationsService.notify(
+        student.imported_by_user_id,
+        `Your imported student "${student.name}"${className} has been approved by ${user.name}.`,
+        'success',
+        '/students',
+      );
+    }
+
+    return { success: true, message: `Student "${student.name}" approved successfully` };
+  }
+
+  async rejectStudent(studentId: number, user: User) {
+    const student = await this.studentRepo.findOne({
+      where: { id: studentId },
+      relations: ['current_class'],
+    });
+    if (!student) throw new NotFoundException('Student not found');
+
+    const studentName = student.name;
+    const creatorId = student.imported_by_user_id;
+    const className = student.current_class?.name ? ` in class ${student.current_class.name}` : '';
+    const classId = student.current_class_id;
+
+    await this.studentRepo.delete(student.id);
+
+    if (classId) {
+      await this.checkAndUpdateClassDistributedStatus([classId]);
+    }
+
+    if (creatorId && creatorId !== user.id) {
+      await this.notificationsService.notify(
+        creatorId,
+        `Your imported student "${studentName}"${className} was rejected and removed by ${user.name}.`,
+        'warning',
+        '/students',
+      );
+    }
+
+    return { success: true, message: `Student "${studentName}" rejected and removed successfully` };
+  }
+
+  async approveStudentsBulk(ids: number[], user: User) {
+    if (!ids || !ids.length) throw new BadRequestException('No student IDs provided');
+    const validIds = ids.map(Number).filter(Number.isFinite);
+    if (!validIds.length) throw new BadRequestException('Invalid student IDs');
+
+    const students = await this.studentRepo.find({
+      where: { id: In(validIds) },
+      relations: ['current_class'],
+    });
+    if (!students.length) return { success: true, count: 0 };
+
+    const now = new Date();
+    for (const s of students) {
+      s.approval_status = 'approved';
+      s.approved_by_user_id = user.id;
+      s.approved_at = now;
+    }
+    await this.studentRepo.save(students);
+
+    const classIds = students.map((s) => s.current_class_id).filter((id): id is number => id != null);
+    await this.checkAndUpdateClassDistributedStatus(classIds);
+
+    const byCreator = new Map<number, number>();
+    for (const s of students) {
+      if (s.imported_by_user_id && s.imported_by_user_id !== user.id) {
+        byCreator.set(s.imported_by_user_id, (byCreator.get(s.imported_by_user_id) || 0) + 1);
+      }
+    }
+    for (const [creatorId, count] of byCreator.entries()) {
+      await this.notificationsService.notify(
+        creatorId,
+        `${count} of your imported student(s) have been approved by ${user.name}.`,
+        'success',
+        '/students',
+      );
+    }
+
+    return { success: true, count: students.length, message: `Approved ${students.length} student(s) successfully` };
+  }
+
+  async rejectStudentsBulk(ids: number[], user: User) {
+    if (!ids || !ids.length) throw new BadRequestException('No student IDs provided');
+    const validIds = ids.map(Number).filter(Number.isFinite);
+    if (!validIds.length) throw new BadRequestException('Invalid student IDs');
+
+    const students = await this.studentRepo.find({
+      where: { id: In(validIds) },
+    });
+    if (!students.length) return { success: true, count: 0 };
+
+    const byCreator = new Map<number, number>();
+    for (const s of students) {
+      if (s.imported_by_user_id && s.imported_by_user_id !== user.id) {
+        byCreator.set(s.imported_by_user_id, (byCreator.get(s.imported_by_user_id) || 0) + 1);
+      }
+    }
+
+    await this.studentRepo.delete(validIds);
+
+    for (const [creatorId, count] of byCreator.entries()) {
+      await this.notificationsService.notify(
+        creatorId,
+        `${count} of your imported student(s) were rejected and removed by ${user.name}.`,
+        'warning',
+        '/students',
+      );
+    }
+
+    return { success: true, count: students.length, message: `Rejected and removed ${students.length} student(s)` };
+  }
+
+  async approveClassImports(classId: number, user: User) {
+    const students = await this.studentRepo.find({
+      where: { current_class_id: classId, approval_status: 'pending' },
+    });
+    if (!students.length) return { success: true, count: 0, message: 'No pending imported students in this class' };
+    return this.approveStudentsBulk(students.map((s) => s.id), user);
+  }
+
+  async rejectClassImports(classId: number, user: User) {
+    const students = await this.studentRepo.find({
+      where: { current_class_id: classId, approval_status: 'pending' },
+    });
+    if (!students.length) return { success: true, count: 0, message: 'No pending imported students in this class' };
+    return this.rejectStudentsBulk(students.map((s) => s.id), user);
   }
 
   private async assertTeacherOwnsClass(classId: number, user: User) {
@@ -706,26 +1581,199 @@ export class AcademicsService {
     );
   }
 
-  // ─── Accountant portal ───────────────────────────────────────────────────────
+  // ─── Distribution Module ───────────────────────────────────────────────────
 
-  async getAllDistributedClasses(academicYearId: number) {
-    // Only DISTRIBUTED classes are visible to the accountant.
-    const classes = await this.classRepo.query(
-      `SELECT c.id, c.name, c.p_level_id, pl.name AS p_level_name
+  async getDistributionSummary(academicYearId?: number) {
+    let yearId = academicYearId;
+    if (!yearId || isNaN(yearId)) {
+      const active = await this.yearRepo.findOne({ where: { status: 'active' }, order: { created_at: 'DESC' } });
+      if (!active) return { academic_year: null, classes: [] };
+      yearId = active.id;
+    }
+
+    const year = await this.yearRepo.findOne({ where: { id: yearId } });
+    if (!year) throw new NotFoundException('Academic year not found');
+
+    const rows = await this.classRepo.query(
+      `SELECT c.id, c.name, c.p_level_id, pl.name AS p_level_name, c.teacher_id, c.distributed_at,
+              t.name AS teacher_name, t.email AS teacher_email,
+              (SELECT COUNT(*) FROM students s WHERE s.current_class_id = c.id) AS student_count,
+              (SELECT COUNT(*) FROM students s WHERE s.current_class_id = c.id AND s.approval_status = 'pending') AS pending_imported_count,
+              (SELECT COUNT(*) FROM students s WHERE s.current_class_id = c.id AND s.approval_status = 'approved') AS approved_student_count
        FROM classes c
        JOIN p_levels pl ON pl.id = c.p_level_id
+       LEFT JOIN users t ON t.id = c.teacher_id
+       WHERE pl.academic_year_id = $1 AND pl.status = 'active' AND c.status = 'active'
+       ORDER BY pl.name ASC, c.name ASC`,
+      [yearId],
+    );
+
+    const classes = rows.map((r: any) => {
+      const pendingCount = Number(r.pending_imported_count ?? 0);
+      const studentCount = Number(r.student_count ?? 0);
+      const isDistributed = !!r.distributed_at;
+
+      let status: 'pending_approval' | 'ready' | 'distributed' = 'ready';
+      if (pendingCount > 0) {
+        status = 'pending_approval';
+      } else if (isDistributed) {
+        status = 'distributed';
+      }
+
+      return {
+        id: r.id,
+        name: r.name,
+        p_level_id: r.p_level_id,
+        p_level_name: r.p_level_name,
+        academic_year_id: year.id,
+        academic_year_name: year.name,
+        teacher_id: r.teacher_id,
+        teacher: r.teacher_id ? { id: r.teacher_id, name: r.teacher_name, email: r.teacher_email } : null,
+        distributed_at: r.distributed_at,
+        student_count: studentCount,
+        pending_imported_count: pendingCount,
+        approved_student_count: Number(r.approved_student_count ?? 0),
+        status,
+      };
+    });
+
+    return {
+      academic_year: { id: year.id, name: year.name, status: year.status },
+      classes,
+    };
+  }
+
+  async distributeClass(classId: number, body: { teacher_id?: number }, user: User) {
+    const cls = await this.classRepo.findOne({
+      where: { id: classId, status: 'active' },
+      relations: ['p_level', 'p_level.academic_year'],
+    });
+    if (!cls) throw new NotFoundException('Class not found');
+
+    const pendingCount = await this.studentRepo.count({
+      where: { current_class_id: classId, approval_status: 'pending' },
+    });
+    if (pendingCount > 0) {
+      throw new BadRequestException(`Cannot distribute ${cls.p_level?.name}${cls.name} while ${pendingCount} student(s) are pending Dean approval.`);
+    }
+
+    if (body.teacher_id !== undefined) {
+      cls.teacher_id = body.teacher_id || null;
+    }
+    cls.distributed_at = new Date();
+    const saved = await this.classRepo.save(cls);
+
+    if (saved.teacher_id) {
+      await this.teachingService.syncClassTeacherAssignments(saved.id);
+      await this.notificationsService.notify(
+        saved.teacher_id,
+        `You have been assigned to teach ${cls.p_level?.name}${saved.name} (${cls.p_level?.academic_year?.name}).`,
+        'info',
+        '/teacher/classes',
+      );
+    }
+
+    await this.notificationsService.notifyRoles(
+      ['accountant', 'dean', 'principal'],
+      `Class list for ${cls.p_level?.name}${saved.name} (${cls.p_level?.academic_year?.name}) has been distributed and is active.`,
+      'success',
+      '/accountant/class-lists',
+    );
+
+    return {
+      success: true,
+      message: `Class ${cls.p_level?.name}${saved.name} distributed successfully to teacher and accountant.`,
+      class: saved,
+    };
+  }
+
+  async distributePLevel(pLevelId: number, teacherAssignments: Array<{ class_id: number; teacher_id: number }>, user: User) {
+    const pl = await this.pLevelRepo.findOne({
+      where: { id: pLevelId, status: 'active' },
+      relations: ['academic_year'],
+    });
+    if (!pl) throw new NotFoundException('P-Level not found');
+
+    const classes = await this.classRepo.find({
+      where: { p_level_id: pLevelId, status: 'active' },
+    });
+
+    const teacherMap = new Map<number, number>();
+    (teacherAssignments ?? []).forEach((ta) => {
+      if (ta.class_id && ta.teacher_id) teacherMap.set(ta.class_id, ta.teacher_id);
+    });
+
+    const distributed: Class[] = [];
+    const now = new Date();
+
+    for (const cls of classes) {
+      const pendingCount = await this.studentRepo.count({
+        where: { current_class_id: cls.id, approval_status: 'pending' },
+      });
+      if (pendingCount > 0) continue; // Skip classes with unapproved students
+
+      if (teacherMap.has(cls.id)) {
+        cls.teacher_id = teacherMap.get(cls.id)!;
+      }
+      cls.distributed_at = now;
+      const saved = await this.classRepo.save(cls);
+      distributed.push(saved);
+
+      if (saved.teacher_id) {
+        await this.teachingService.syncClassTeacherAssignments(saved.id);
+        await this.notificationsService.notify(
+          saved.teacher_id,
+          `You have been assigned to teach ${pl.name}${saved.name} (${pl.academic_year?.name}).`,
+          'info',
+          '/teacher/classes',
+        );
+      }
+    }
+
+    await this.notificationsService.notifyRoles(
+      ['accountant', 'dean', 'principal'],
+      `Classes in ${pl.name} (${pl.academic_year?.name}) have been distributed and are active.`,
+      'success',
+      '/accountant/class-lists',
+    );
+
+    return {
+      success: true,
+      distributed_count: distributed.length,
+      message: `Distributed ${distributed.length} class(es) in ${pl.name}.`,
+    };
+  }
+
+  // ─── Accountant portal ───────────────────────────────────────────────────────
+
+  async getAllDistributedClasses(academicYearId?: number) {
+    let yearId = academicYearId;
+    if (!yearId || isNaN(yearId)) {
+      const active = await this.yearRepo.findOne({ where: { status: 'active' }, order: { created_at: 'DESC' } });
+      if (!active) return [];
+      yearId = active.id;
+    }
+
+    // Distributed classes visible to accountant
+    const classes = await this.classRepo.query(
+      `SELECT c.id, c.name, c.p_level_id, pl.name AS p_level_name, ay.id AS academic_year_id, ay.name AS academic_year_name,
+              c.teacher_id, t.name AS teacher_name, c.distributed_at
+       FROM classes c
+       JOIN p_levels pl ON pl.id = c.p_level_id
+       JOIN academic_years ay ON ay.id = pl.academic_year_id
+       LEFT JOIN users t ON t.id = c.teacher_id
        WHERE pl.academic_year_id = $1
          AND pl.status = 'active'
          AND c.status = 'active'
          AND c.distributed_at IS NOT NULL
        ORDER BY pl.name ASC, c.name ASC`,
-      [academicYearId],
+      [yearId],
     );
     if (!classes.length) return [];
 
     const classIds = classes.map((c: any) => c.id);
     const students = await this.studentRepo.query(
-      `SELECT id, name, rank, marks_percentage, former_class, current_class_id
+      `SELECT id, student_id_number, name, rank, marks_percentage, former_class, current_class_id, approval_status, is_imported, created_at
        FROM students
        WHERE current_class_id = ANY($1)
        ORDER BY rank ASC NULLS LAST, name ASC`,
@@ -737,10 +1785,13 @@ export class AcademicsService {
       if (!byClass.has(s.current_class_id)) byClass.set(s.current_class_id, []);
       byClass.get(s.current_class_id)!.push({
         id: s.id,
+        student_id_number: s.student_id_number,
         name: s.name,
         rank: s.rank,
         marks_percentage: s.marks_percentage,
         former_class: s.former_class,
+        approval_status: s.approval_status,
+        is_imported: s.is_imported,
       });
     }
 
@@ -748,6 +1799,10 @@ export class AcademicsService {
       id: c.id,
       name: c.name,
       p_level: { id: c.p_level_id, name: c.p_level_name },
+      academic_year: { id: c.academic_year_id, name: c.academic_year_name },
+      teacher: c.teacher_id ? { id: c.teacher_id, name: c.teacher_name } : null,
+      distributed_at: c.distributed_at,
+      student_count: (byClass.get(c.id) ?? []).length,
       students: byClass.get(c.id) ?? [],
     }));
   }

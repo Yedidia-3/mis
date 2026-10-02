@@ -73,21 +73,10 @@ export function ExcelImport() {
       const formData = new FormData();
       formData.append('file', selectedFile);
 
-      const res = await fetch(
-        `${BASE_URL}/api/v1/academics/p-levels/${selectedPLevelId}/import?academic_year_id=${activeYear.id}`,
-        {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
-          body: formData,
-        }
+      const result = await api.upload<ImportResult>(
+        `/api/v1/academics/p-levels/${selectedPLevelId}/import?academic_year_id=${activeYear.id}`,
+        formData,
       );
-
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.message ?? `Upload failed (${res.status})`);
-      }
-
-      const result: ImportResult = await res.json();
       setImportResult(result);
     } catch (err: any) {
       setError(err.message ?? 'Import failed');
@@ -123,9 +112,20 @@ export function ExcelImport() {
           <h1 className="text-2xl font-semibold" style={{ color: "var(--dark-gray)" }}>Import Student Data</h1>
           <p className="text-sm mt-1" style={{ color: "var(--mid-gray)" }}>Upload Excel file with student information</p>
         </div>
-        <Button variant="ghost" size="sm" onClick={handleBack} style={{ color: "var(--maroon)" }}>
-          Back
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => navigate("/students")}
+            className="text-xs font-semibold"
+            style={{ borderColor: "var(--border)" }}
+          >
+            Go to Student Directory & Import →
+          </Button>
+          <Button variant="ghost" size="sm" onClick={handleBack} style={{ color: "var(--maroon)" }}>
+            Back
+          </Button>
+        </div>
       </div>
 
       {/* Steps Indicator */}

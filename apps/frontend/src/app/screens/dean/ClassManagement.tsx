@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowLeftRight, Loader2, MoreVertical, Plus, Search, Upload, Users } from "lucide-react";
+import { AlertTriangle, ArrowLeft, ArrowLeftRight, CheckCircle2, Loader2, MoreVertical, Plus, Search, Upload, Users, XCircle } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import { toast } from "sonner";
@@ -10,8 +10,10 @@ import { Button } from "../../components/ui/button";
 import { Card, CardContent } from "../../components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../../components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../../components/ui/dropdown-menu";
+import { HoverCard, HoverCardContent, HoverCardTrigger } from "../../components/ui/hover-card";
 import { Input } from "../../components/ui/input";
 import { Label } from "../../components/ui/label";
+import { Popover, PopoverContent, PopoverTrigger } from "../../components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../../components/ui/table";
 
@@ -22,6 +24,7 @@ interface ClassData {
   teacher: { id: number; name: string } | null;
   students?: any[];
   student_count?: number;
+  pending_imported_count?: number;
   status: string;
 }
 
@@ -247,6 +250,66 @@ export function ClassManagement() {
     }
   };
 
+  const handleApproveStudent = async (studentId: number) => {
+    setSaving(true);
+    try {
+      await api.post(`/api/v1/academics/students/${studentId}/approve`);
+      toast.success('Student approved successfully');
+      if (selectedClass) {
+        await Promise.all([load(), loadClassStudents(selectedClass.id)]);
+      } else {
+        await load();
+      }
+    } catch (err: any) {
+      toast.error(err.message ?? 'Failed to approve student');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleRejectStudent = async (studentId: number) => {
+    setSaving(true);
+    try {
+      await api.post(`/api/v1/academics/students/${studentId}/reject`);
+      toast.success('Student rejected and removed successfully');
+      if (selectedClass) {
+        await Promise.all([load(), loadClassStudents(selectedClass.id)]);
+      } else {
+        await load();
+      }
+    } catch (err: any) {
+      toast.error(err.message ?? 'Failed to reject student');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleApproveClassImports = async (classId: number) => {
+    setSaving(true);
+    try {
+      const res = await api.post<any>(`/api/v1/academics/classes/${classId}/approve-imports`);
+      toast.success(res.message ?? 'All imported students approved');
+      await Promise.all([load(), loadClassStudents(classId)]);
+    } catch (err: any) {
+      toast.error(err.message ?? 'Failed to approve imports');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleRejectClassImports = async (classId: number) => {
+    setSaving(true);
+    try {
+      const res = await api.post<any>(`/api/v1/academics/classes/${classId}/reject-imports`);
+      toast.success(res.message ?? 'All imported students rejected');
+      await Promise.all([load(), loadClassStudents(classId)]);
+    } catch (err: any) {
+      toast.error(err.message ?? 'Failed to reject imports');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const openMoveDialog = (student: any) => {
     setSelectedStudent(student);
     setTargetClassId('');
@@ -257,6 +320,7 @@ export function ClassManagement() {
   const filteredStudents = classStudents.filter((student) =>
     student.name.toLowerCase().includes(studentSearch.toLowerCase()),
   );
+  const pendingCountInClass = classStudents.filter((s) => s.approval_status === 'pending').length;
 
   if (loading) return (
     <div className="flex justify-center py-20">
@@ -343,74 +407,182 @@ export function ClassManagement() {
             {studentsLoading ? (
               <div className="flex justify-center py-8"><Loader2 className="animate-spin" size={24} style={{ color: 'var(--navy-blue)' }} /></div>
             ) : (
-              <div className="border rounded-lg overflow-x-auto" style={{ borderColor: 'var(--border)' }}>
-                <Table>
-                  <TableHeader style={{ backgroundColor: 'var(--navy-blue)' }}>
-                    <TableRow>
-                      <TableHead className="text-white w-10">#</TableHead>
-                      <TableHead className="text-white">Name</TableHead>
-                      <TableHead className="text-white">Former Class</TableHead>
-                      <TableHead className="text-white">Rank</TableHead>
-                      <TableHead className="text-white">Marks %</TableHead>
-                      {!isPrincipal && <TableHead className="text-white text-right">Action</TableHead>}
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {filteredStudents.length === 0 ? (
+              <>
+                {pendingCountInClass > 0 && !isPrincipal && (
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between p-4 rounded-xl border border-amber-300 bg-amber-50 text-amber-900 shadow-xs mb-4">
+                    <div className="flex items-center gap-2.5">
+                      <AlertTriangle className="h-5 w-5 text-amber-600 shrink-0" />
+                      <div>
+                        <p className="text-sm font-bold">
+                          Contains {pendingCountInClass} imported student(s) pending Dean's review
+                        </p>
+                        <p className="text-xs text-amber-700">
+                          Unapproved students have full system access but require approval to become permanent.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex gap-2 shrink-0">
+                      <Button
+                        size="sm"
+                        className="bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-xs h-9 px-3 rounded-lg"
+                        onClick={() => handleApproveClassImports(selectedClass.id)}
+                        disabled={saving}
+                      >
+                        <CheckCircle2 size={14} className="mr-1" /> Approve All ({pendingCountInClass})
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        className="bg-red-600 hover:bg-red-700 text-white font-medium text-xs h-9 px-3 rounded-lg"
+                        onClick={() => handleRejectClassImports(selectedClass.id)}
+                        disabled={saving}
+                      >
+                        <XCircle size={14} className="mr-1" /> Reject All ({pendingCountInClass})
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
+                <div className="border rounded-lg overflow-x-auto" style={{ borderColor: 'var(--border)' }}>
+                  <Table>
+                    <TableHeader style={{ backgroundColor: 'var(--navy-blue)' }}>
                       <TableRow>
-                        <TableCell colSpan={isPrincipal ? 5 : 6} className="text-center py-8" style={{ color: 'var(--mid-gray)' }}>
-                          No students in this class
-                        </TableCell>
+                        <TableHead className="text-white w-10">#</TableHead>
+                        <TableHead className="text-white">Name</TableHead>
+                        <TableHead className="text-white">Former Class</TableHead>
+                        <TableHead className="text-white">Rank</TableHead>
+                        <TableHead className="text-white">Marks %</TableHead>
+                        {!isPrincipal && <TableHead className="text-white text-right">Action</TableHead>}
                       </TableRow>
-                    ) : filteredStudents.map((student, index) => {
-                      const draft = studentEdits[student.id] ?? buildStudentEditState(student);
-                      return (
-                        <TableRow key={student.id} style={{ backgroundColor: index % 2 === 0 ? '#FFFFFF' : 'var(--light-gray)' }}>
-                          <TableCell className="text-sm" style={{ color: 'var(--mid-gray)' }}>{index + 1}</TableCell>
-                          {!isPrincipal && classViewMode === 'update' ? (
-                            <>
-                              <TableCell className="font-medium" style={{ color: 'var(--dark-gray)' }}>
-                                <Input value={draft.name} onChange={(e) => handleStudentEditChange(student.id, 'name', e.target.value)} className="h-9" />
-                              </TableCell>
-                              <TableCell>
-                                <Input value={draft.former_class} onChange={(e) => handleStudentEditChange(student.id, 'former_class', e.target.value)} className="h-9" placeholder="Former class" />
-                              </TableCell>
-                              <TableCell>
-                                <Input type="number" min="0" step="1" value={draft.rank} onChange={(e) => handleStudentEditChange(student.id, 'rank', e.target.value)} className="h-9" />
-                              </TableCell>
-                              <TableCell>
-                                <Input type="number" min="0" max="100" step="0.01" value={draft.marks_percentage} onChange={(e) => handleStudentEditChange(student.id, 'marks_percentage', e.target.value)} className="h-9" />
-                              </TableCell>
-                              <TableCell className="text-right space-x-2">
-                                <Button variant="outline" size="sm" onClick={() => handleSaveStudent(student)} disabled={saving} style={{ color: 'var(--navy-blue)', borderColor: 'var(--navy-blue)' }}>
-                                   Save
-                                </Button>
-                                <Button variant="ghost" size="sm" onClick={() => openMoveDialog(student)} style={{ color: 'var(--maroon)' }}>
-                                  <ArrowLeftRight size={16} className="mr-1" /> Move
-                                </Button>
-                              </TableCell>
-                            </>
-                          ) : (
-                            <>
-                              <TableCell className="font-medium" style={{ color: 'var(--dark-gray)' }}>{student.name}</TableCell>
-                              <TableCell style={{ color: 'var(--dark-gray)' }}>{student.former_class ?? '—'}</TableCell>
-                              <TableCell style={{ color: 'var(--dark-gray)' }}>{student.rank ?? '—'}</TableCell>
-                              <TableCell style={{ color: 'var(--dark-gray)' }}>{student.marks_percentage != null ? `${student.marks_percentage}%` : '—'}</TableCell>
-                              {!isPrincipal && (
-                                <TableCell className="text-right">
+                    </TableHeader>
+                    <TableBody>
+                      {filteredStudents.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={isPrincipal ? 5 : 6} className="text-center py-8" style={{ color: 'var(--mid-gray)' }}>
+                            No students in this class
+                          </TableCell>
+                        </TableRow>
+                      ) : filteredStudents.map((student, index) => {
+                        const draft = studentEdits[student.id] ?? buildStudentEditState(student);
+                        return (
+                          <TableRow key={student.id} style={{ backgroundColor: index % 2 === 0 ? '#FFFFFF' : 'var(--light-gray)' }}>
+                            <TableCell className="text-sm" style={{ color: 'var(--mid-gray)' }}>{index + 1}</TableCell>
+                            {!isPrincipal && classViewMode === 'update' ? (
+                              <>
+                                <TableCell className="font-medium" style={{ color: 'var(--dark-gray)' }}>
+                                  <Input value={draft.name} onChange={(e) => handleStudentEditChange(student.id, 'name', e.target.value)} className="h-9" />
+                                </TableCell>
+                                <TableCell>
+                                  <Input value={draft.former_class} onChange={(e) => handleStudentEditChange(student.id, 'former_class', e.target.value)} className="h-9" placeholder="Former class" />
+                                </TableCell>
+                                <TableCell>
+                                  <Input type="number" min="0" step="1" value={draft.rank} onChange={(e) => handleStudentEditChange(student.id, 'rank', e.target.value)} className="h-9" />
+                                </TableCell>
+                                <TableCell>
+                                  <Input type="number" min="0" max="100" step="0.01" value={draft.marks_percentage} onChange={(e) => handleStudentEditChange(student.id, 'marks_percentage', e.target.value)} className="h-9" />
+                                </TableCell>
+                                <TableCell className="text-right space-x-2">
+                                  <Button variant="outline" size="sm" onClick={() => handleSaveStudent(student)} disabled={saving} style={{ color: 'var(--navy-blue)', borderColor: 'var(--navy-blue)' }}>
+                                     Save
+                                  </Button>
                                   <Button variant="ghost" size="sm" onClick={() => openMoveDialog(student)} style={{ color: 'var(--maroon)' }}>
                                     <ArrowLeftRight size={16} className="mr-1" /> Move
                                   </Button>
                                 </TableCell>
-                              )}
-                            </>
-                          )}
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
-              </div>
+                              </>
+                            ) : (
+                              <>
+                                <TableCell className="font-medium" style={{ color: 'var(--dark-gray)' }}>
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span>{student.name}</span>
+                                    {student.approval_status === 'pending' && (
+                                      <Popover>
+                                        <HoverCard openDelay={150}>
+                                          <HoverCardTrigger asChild>
+                                            <PopoverTrigger asChild>
+                                              <span
+                                                className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold cursor-pointer transition-all hover:scale-105 shadow-xs animate-pulse"
+                                                style={{ backgroundColor: '#FEF3C7', color: '#B45309', border: '1px solid #FCD34D' }}
+                                              >
+                                                ⚠️ Imported!
+                                              </span>
+                                            </PopoverTrigger>
+                                          </HoverCardTrigger>
+                                          <HoverCardContent className="w-72 p-3 border shadow-md rounded-xl bg-white text-left" align="start">
+                                            <div className="space-y-1.5">
+                                              <div className="flex items-center justify-between border-b pb-1.5">
+                                                <span className="text-[11px] font-bold uppercase tracking-wider text-amber-700">Imported Student</span>
+                                                <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-amber-100 text-amber-800">Pending Review</span>
+                                              </div>
+                                              <p className="text-xs font-bold text-gray-900">{student.name}</p>
+                                              <p className="text-xs text-gray-600">
+                                                <strong>Imported by:</strong> {student.imported_by?.name || 'Staff member'} ({student.imported_by?.role || 'Staff'})
+                                              </p>
+                                              <p className="text-xs text-gray-500">
+                                                <strong>Imported on:</strong> {student.imported_at ? new Date(student.imported_at).toLocaleString() : 'N/A'}
+                                              </p>
+                                              <p className="text-[11px] text-amber-700 italic pt-1">Click badge to Approve or Reject.</p>
+                                            </div>
+                                          </HoverCardContent>
+                                        </HoverCard>
+                                        <PopoverContent className="w-80 p-4 border shadow-xl rounded-xl bg-white text-left" align="start">
+                                          <div className="space-y-3">
+                                            <div className="flex items-center justify-between border-b pb-2">
+                                              <span className="text-xs font-bold uppercase tracking-wider text-amber-700">Review Imported Student</span>
+                                              <span className="text-xs font-semibold px-2 py-0.5 rounded bg-amber-100 text-amber-800">Pending</span>
+                                            </div>
+                                            <div className="text-xs space-y-1 text-gray-700">
+                                              <p className="text-sm font-bold text-gray-900">{student.name}</p>
+                                              {student.student_id_number && <p><span className="text-gray-500">Student ID:</span> {student.student_id_number}</p>}
+                                              <p><span className="text-gray-500">Imported by:</span> <strong>{student.imported_by?.name || 'Staff member'}</strong> ({student.imported_by?.role || 'Staff'})</p>
+                                              <p><span className="text-gray-500">Imported at:</span> {student.imported_at ? new Date(student.imported_at).toLocaleString() : 'N/A'}</p>
+                                            </div>
+                                            {!isPrincipal && (
+                                              <div className="border-t pt-3 flex gap-2">
+                                                <Button
+                                                  size="sm"
+                                                  className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white text-xs h-9 rounded-lg"
+                                                  onClick={() => handleApproveStudent(student.id)}
+                                                  disabled={saving}
+                                                >
+                                                  <CheckCircle2 size={14} className="mr-1" /> Approve
+                                                </Button>
+                                                <Button
+                                                  size="sm"
+                                                  variant="destructive"
+                                                  className="flex-1 bg-red-600 hover:bg-red-700 text-white text-xs h-9 rounded-lg"
+                                                  onClick={() => handleRejectStudent(student.id)}
+                                                  disabled={saving}
+                                                >
+                                                  <XCircle size={14} className="mr-1" /> Reject
+                                                </Button>
+                                              </div>
+                                            )}
+                                          </div>
+                                        </PopoverContent>
+                                      </Popover>
+                                    )}
+                                  </div>
+                                </TableCell>
+                                <TableCell style={{ color: 'var(--dark-gray)' }}>{student.former_class ?? '—'}</TableCell>
+                                <TableCell style={{ color: 'var(--dark-gray)' }}>{student.rank ?? '—'}</TableCell>
+                                <TableCell style={{ color: 'var(--dark-gray)' }}>{student.marks_percentage != null ? `${student.marks_percentage}%` : '—'}</TableCell>
+                                {!isPrincipal && (
+                                  <TableCell className="text-right">
+                                    <Button variant="ghost" size="sm" onClick={() => openMoveDialog(student)} style={{ color: 'var(--maroon)' }}>
+                                      <ArrowLeftRight size={16} className="mr-1" /> Move
+                                    </Button>
+                                  </TableCell>
+                                )}
+                              </>
+                            )}
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
+              </>
             )}
           </CardContent>
         </Card>
@@ -436,8 +608,18 @@ export function ClassManagement() {
               <Card key={classItem.id} style={{ borderColor: "var(--border)" }}>
                 <CardContent className="p-6">
                   <div className="flex items-start justify-between mb-4">
-                    <div>
+                    <div className="flex items-center gap-2 flex-wrap">
                       <h3 className="text-2xl font-bold" style={{ color: "var(--dark-gray)" }}>{pLevel?.name}{classItem.name}</h3>
+                      {Number(classItem.pending_imported_count || 0) > 0 && (
+                        <span
+                          className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold shadow-xs cursor-pointer animate-pulse"
+                          style={{ backgroundColor: '#FEF3C7', color: '#B45309', border: '1px solid #FCD34D' }}
+                          title={`${classItem.pending_imported_count} imported student(s) pending review`}
+                          onClick={() => { setSelectedClass(classItem); setClassViewMode('view'); void loadClassStudents(classItem.id); }}
+                        >
+                          ⚠️ Imported! ({classItem.pending_imported_count})
+                        </span>
+                      )}
                     </div>
                     {!isPrincipal && (
                       <DropdownMenu>

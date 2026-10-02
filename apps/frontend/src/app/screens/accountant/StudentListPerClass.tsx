@@ -57,6 +57,7 @@ export function StudentListPerClass() {
   const navigate = useNavigate();
 
   const [pLevelName, setPLevelName] = useState("");
+  const [activeYearName, setActiveYearName] = useState("");
   const [classes, setClasses] = useState<ClassData[]>([]);
   const [zones, setZones] = useState<Zone[]>([]);
   const [loading, setLoading] = useState(true);
@@ -92,6 +93,8 @@ export function StudentListPerClass() {
       const yearList = Array.isArray(years) ? years : years.data ?? [];
       const active = yearList.find((y: any) => y.status === 'active');
       if (!active) { toast.error('No active academic year'); setLoading(false); return; }
+
+      setActiveYearName(active.name);
 
       const [allClasses, zoneRes] = await Promise.all([
         api.get<any>(`/api/v1/academics/all-classes?academic_year_id=${active.id}`),
@@ -329,9 +332,16 @@ export function StudentListPerClass() {
 
       <div className="flex items-start justify-between flex-wrap gap-4">
         <div>
-          <h1 className="text-2xl font-semibold" style={{ color: "var(--dark-gray)" }}>
-            {pLevelName} — Class List
-          </h1>
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-semibold" style={{ color: "var(--dark-gray)" }}>
+              {pLevelName} — Class List
+            </h1>
+            {activeYearName && (
+              <span className="px-3 py-1 rounded-full text-xs font-semibold text-white bg-amber-700">
+                Academic Year {activeYearName}
+              </span>
+            )}
+          </div>
           <p className="text-sm mt-1" style={{ color: "var(--mid-gray)" }}>
             Enroll distributed students into a service, then waive anyone who opts out.
           </p>

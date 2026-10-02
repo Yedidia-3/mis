@@ -45,9 +45,38 @@ async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> 
   return (json?.data !== undefined ? json.data : json) as T;
 }
 
+async function apiUpload<T>(path: string, formData: FormData): Promise<T> {
+  const token = localStorage.getItem('token');
+  const cleanPath = path.replace(/^\/?api\/v1\/?/, '');
+  const formattedEndpoint = cleanPath.startsWith('/') ? cleanPath : `/${cleanPath}`;
+  const fullUrl = `${BASE_URL}${formattedEndpoint}`;
+
+  const res = await fetch(fullUrl, {
+    method: 'POST',
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: formData,
+  });
+
+  if (!res.ok) {
+    if (res.status === 401 && token) {
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
+      window.location.href = '/login';
+    }
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err?.message ?? err?.data?.message ?? `Upload failed (${res.status})`);
+  }
+
+  const json = await res.json();
+  return (json?.data !== undefined ? json.data : json) as T;
+}
+
 export const api = {
   get:    <T>(path: string)                => apiFetch<T>(path, { method: 'GET' }),
   post:   <T>(path: string, body: unknown) => apiFetch<T>(path, { method: 'POST',   body: JSON.stringify(body) }),
   put:    <T>(path: string, body: unknown) => apiFetch<T>(path, { method: 'PUT',    body: JSON.stringify(body) }),
   delete: <T>(path: string)                => apiFetch<T>(path, { method: 'DELETE' }),
+  upload: <T>(path: string, data: FormData) => apiUpload<T>(path, data),
 };
