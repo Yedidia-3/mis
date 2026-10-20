@@ -14,7 +14,18 @@ import { Label } from "../../components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../../components/ui/table";
 
-interface PaymentCell { paid_on: string; months: number; expires_on: string; }
+interface PaymentCell {
+  paid_on: string;
+  months: number;
+  expires_on: string;
+  kind?: "full" | "partial";
+  unit_price?: number;
+  full_amount?: number;
+  amount_paid?: number;
+  balance?: number;
+}
+
+interface FeedingPrices { breakfast: number; lunch: number; }
 
 interface Enrollment {
   id: number;
@@ -41,6 +52,12 @@ function fmtLocal(dateStr: string): string {
   if (!dateStr) return '';
   const [y, m, d] = dateStr.split('-').map(Number);
   return new Date(y, m - 1, d).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+}
+function rwf(n: number): string {
+  return `RWF ${Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+}
+function roundMoney(n: number): number {
+  return Math.round((Number(n) + Number.EPSILON) * 100) / 100;
 }
 function cellState(cell?: PaymentCell): "none" | "active" | "soon" | "expired" {
   if (!cell) return "none";
@@ -82,16 +99,33 @@ export function FeedingEnrollment() {
   const [pLevelFilter, setPLevelFilter] = useState<string>("all");
   const [classFilter, setClassFilter] = useState<string>("all");
   const [savingId, setSavingId] = useState<number | null>(null);
+  const [prices, setPrices] = useState<FeedingPrices>({ breakfast: 0, lunch: 0 });
+  const [priceDraft, setPriceDraft] = useState<{ breakfast: string; lunch: string }>({ breakfast: "", lunch: "" });
+  const [savingPrices, setSavingPrices] = useState(false);
 
   // Payment dialog (opens when ticking an unpaid box)
-  const [payTarget, setPayTarget] = useState<{ e: Enrollment; key: string; label: string } | null>(null);
+  const [payTarget, setPayTarget] = useState<{ e: Enrollment; key: string; label: string; meal: "B" | "L" } | null>(null);
   const [payDate, setPayDate] = useState("");
   const [payMonths, setPayMonths] = useState<string>("1");
+  const [payKind, setPayKind] = useState<"full" | "partial">("full");
+  const [amountPaid, setAmountPaid] = useState("");
 
   const load = useCallback(async () => {
     try {
-      const res = await api.get<any>('/api/v1/accountant/enrollments?type=feeding');
+      const [res, priceRes] = await Promise.all([
+        api.get<any>('/api/v1/accountant/enrollments?type=feeding'),
+        api.get<FeedingPrices>('/api/v1/accountant/feeding-prices').catch(() => ({ breakfast: 0, lunch: 0 })),
+      ]);
       setEnrollments(Array.isArray(res) ? res : res.data ?? []);
+      const nextPrices = {
+        breakfast: Number(priceRes?.breakfast) || 0,
+        lunch: Number(priceRes?.lunch) || 0,
+      };
+      setPrices(nextPrices);
+      setPriceDraft({
+        breakfast: nextPrices.breakfast ? String(nextPrices.breakfast) : "",
+        lunch: nextPrices.lunch ? String(nextPrices.lunch) : "",
+      });
     } catch {
       // silent
     } finally {
@@ -142,7 +176,13 @@ export function FeedingEnrollment() {
     setEnrollments(prev => prev.map(x => x.id === e.id ? { ...x, payments: next } : x));
     setSavingId(e.id);
     try {
-      await api.put(`/api/v1/accountant/enrollments/${e.id}/payments`, { payments: next });
+      const saved = await api.put<{ payments: Record<string, PaymentCell> }>(
+        `/api/v1/accountant/enrollments/${e.id}/payments`,
+        { payments: next },
+      );
+      if (saved?.payments) {
+        setEnrollments(prev => prev.map(x => x.id === e.id ? { ...x, payments: saved.payments } : x));
+      }
     } catch (err: any) {
       toast.error(err.message ?? 'Failed to update payment');
       load();
@@ -151,25 +191,72 @@ export function FeedingEnrollment() {
     }
   };
 
+  const savePrices = async () => {
+    const breakfast = roundMoney(Number(priceDraft.breakfast || 0));
+    const lunch = roundMoney(Number(priceDraft.lunch || 0));
+    if (breakfast < 0 || lunch < 0 || Number.isNaN(breakfast) || Number.isNaN(lunch)) {
+      toast.error('Enter a valid amount for each meal.');
+      return;
+    }
+    setSavingPrices(true);
+    try {
+      const saved = await api.put<FeedingPrices>('/api/v1/accountant/feeding-prices', { breakfast, lunch });
+      const next = { breakfast: Number(saved.breakfast) || 0, lunch: Number(saved.lunch) || 0 };
+      setPrices(next);
+      setPriceDraft({
+        breakfast: next.breakfast ? String(next.breakfast) : "",
+        lunch: next.lunch ? String(next.lunch) : "",
+      });
+      toast.success('Meal prices saved. New ticks will load these amounts.');
+    } catch (err: any) {
+      toast.error(err.message ?? 'Failed to save prices');
+    } finally {
+      setSavingPrices(false);
+    }
+  };
+
   const onToggle = (e: Enrollment, month: number, meal: "B" | "L") => {
     const key = `${month}${meal}`;
     if (e.payments?.[key]) {
-      // unticking → remove the payment
       const next = { ...e.payments };
       delete next[key];
       savePayments(e, next);
     } else {
-      // ticking → ask for the payment date + duration
-      setPayTarget({ e, key, label: `${e.student?.name ?? ''} · Month ${month} ${meal === 'B' ? 'Breakfast' : 'Lunch'}` });
+      const unit = meal === "B" ? prices.breakfast : prices.lunch;
+      if (!(unit > 0)) {
+        toast.error(`Set the ${meal === "B" ? "breakfast" : "lunch"} price first.`);
+        return;
+      }
+      setPayTarget({
+        e, key, meal,
+        label: `${e.student?.name ?? ''} · Month ${month} ${meal === 'B' ? 'Breakfast' : 'Lunch'}`,
+      });
       setPayDate(new Date().toISOString().split('T')[0]);
       setPayMonths("1");
+      setPayKind("full");
+      setAmountPaid("");
     }
   };
 
+  const unitPrice = payTarget ? (payTarget.meal === "B" ? prices.breakfast : prices.lunch) : 0;
+  const fullAmount = roundMoney(unitPrice * (+payMonths || 1));
+  const paidNumber = roundMoney(Number(amountPaid));
+  const partialInvalid = payKind === "partial" && (!(paidNumber > 0) || paidNumber > fullAmount);
+  const balance = payKind === "partial" && paidNumber > 0 && paidNumber <= fullAmount
+    ? roundMoney(fullAmount - paidNumber)
+    : 0;
+
   const confirmPayment = () => {
-    if (!payTarget || !payDate) return;
+    if (!payTarget || !payDate || partialInvalid || !(unitPrice > 0)) return;
     const months = +payMonths;
-    const cell: PaymentCell = { paid_on: payDate, months, expires_on: addMonths(payDate, months) };
+    // Omit the price snapshot so the server loads the saved meal price.
+    const cell: PaymentCell = {
+      paid_on: payDate,
+      months,
+      expires_on: addMonths(payDate, months),
+      kind: payKind,
+      ...(payKind === "partial" ? { amount_paid: paidNumber } : {}),
+    };
     const next = { ...(payTarget.e.payments ?? {}), [payTarget.key]: cell };
     savePayments(payTarget.e, next);
     setPayTarget(null);
@@ -188,10 +275,13 @@ export function FeedingEnrollment() {
   const handleExport = () => {
     const header = "Name,Class," + MONTHS.flatMap(m => [`M${m} Breakfast`, `M${m} Lunch`]).join(",") + "\n";
     const rows = filtered.map(e => {
-      const cells = MONTHS.flatMap(m => [
-        e.payments?.[`${m}B`]?.expires_on ? `exp ${e.payments[`${m}B`].expires_on}` : "",
-        e.payments?.[`${m}L`]?.expires_on ? `exp ${e.payments[`${m}L`].expires_on}` : "",
-      ]);
+      const describe = (cell?: PaymentCell) => {
+        if (!cell?.expires_on) return "";
+        if (cell.kind === "partial") return `partial paid ${cell.amount_paid ?? ""} left ${cell.balance ?? ""} exp ${cell.expires_on}`;
+        if (cell.kind === "full") return `full ${cell.full_amount ?? ""} exp ${cell.expires_on}`;
+        return `exp ${cell.expires_on}`;
+      };
+      const cells = MONTHS.flatMap(m => [describe(e.payments?.[`${m}B`]), describe(e.payments?.[`${m}L`])]);
       return `"${e.student?.name ?? ''}","${classLabel(e)}",${cells.map(c => `"${c}"`).join(",")}`;
     }).join("\n");
     const blob = new Blob([header + rows], { type: 'text/csv' });
@@ -211,7 +301,7 @@ export function FeedingEnrollment() {
           </Button>
           <h1 className="text-2xl font-semibold" style={{ color: "var(--dark-gray)" }}>School Feeding</h1>
           <p className="text-sm mt-1" style={{ color: "var(--mid-gray)" }}>
-            Tick Breakfast (B) and Lunch (L) per month for each enrolled student
+            Tick Breakfast (B) and Lunch (L). Each tick loads the price saved below.
           </p>
         </div>
         <div className="flex gap-2">
@@ -225,6 +315,44 @@ export function FeedingEnrollment() {
           </Button>
         </div>
       </div>
+
+      <Card style={{ borderColor: "var(--border)" }}>
+        <CardContent className="p-5">
+          <p className="font-semibold" style={{ color: "var(--dark-gray)" }}>Meal prices</p>
+          <p className="text-sm mt-1 mb-4" style={{ color: "var(--mid-gray)" }}>
+            Set these once. A breakfast tick loads the breakfast amount, a lunch tick loads the lunch amount, multiplied by the months selected.
+          </p>
+          <div className="grid grid-cols-1 md:grid-cols-[1fr_1fr_auto] gap-3 items-end">
+            <div>
+              <Label>Breakfast (RWF)</Label>
+              <Input type="number" min={0} step="1" inputMode="decimal" placeholder="Not set"
+                value={priceDraft.breakfast}
+                onChange={e => setPriceDraft(d => ({ ...d, breakfast: e.target.value }))}
+                className="mt-2 h-11" />
+            </div>
+            <div>
+              <Label>Lunch (RWF)</Label>
+              <Input type="number" min={0} step="1" inputMode="decimal" placeholder="Not set"
+                value={priceDraft.lunch}
+                onChange={e => setPriceDraft(d => ({ ...d, lunch: e.target.value }))}
+                className="mt-2 h-11" />
+            </div>
+            <Button className="h-11" onClick={savePrices} disabled={savingPrices}
+              style={{ backgroundColor: "var(--maroon)", color: "#FFFFFF" }}>
+              {savingPrices ? <Loader2 className="animate-spin" size={18} /> : "Save prices"}
+            </Button>
+          </div>
+          {(!(prices.breakfast > 0) || !(prices.lunch > 0)) && (
+            <p className="text-sm mt-3" style={{ color: "var(--warning-amber)" }}>
+              {!(prices.breakfast > 0) && !(prices.lunch > 0)
+                ? "Both prices are still empty, so payment ticks stay locked."
+                : !(prices.breakfast > 0)
+                  ? "Breakfast is not priced yet. Lunch ticks can be recorded."
+                  : "Lunch is not priced yet. Breakfast ticks can be recorded."}
+            </p>
+          )}
+        </CardContent>
+      </Card>
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
         {stats.map((stat) => (
@@ -318,17 +446,28 @@ export function FeedingEnrollment() {
                         const key = `${m}${meal.key}`;
                         const cell = e.payments?.[key];
                         const state = cellState(cell);
+                        const title = !cell
+                          ? "Not paid"
+                          : cell.kind === "partial"
+                            ? `Partial · paid ${rwf(cell.amount_paid ?? 0)} · left ${rwf(cell.balance ?? 0)} · expires ${cell.expires_on}`
+                            : cell.kind === "full"
+                              ? `Full · ${rwf(cell.amount_paid ?? cell.full_amount ?? 0)} · expires ${cell.expires_on}`
+                              : `Paid ${cell.paid_on} · expires ${cell.expires_on}`;
                         return (
                           <TableCell key={key} className="text-center">
-                            <div className="flex flex-col items-center gap-0.5"
-                              title={cell ? `Paid ${cell.paid_on} · expires ${cell.expires_on}` : 'Not paid'}>
+                            <div className="flex flex-col items-center gap-0.5" title={title}>
                               <Checkbox
                                 checked={!!cell}
                                 onCheckedChange={() => onToggle(e, m, meal.key)}
                               />
-                              {cell && (
-                                <span className="w-1.5 h-1.5 rounded-full"
-                                  style={{ backgroundColor: STATE_COLOR[state] }} />
+                              {cell?.kind === "partial" && (
+                                <span className="text-[10px] font-semibold leading-none" style={{ color: "var(--warning-amber)" }}>P</span>
+                              )}
+                              {cell?.kind === "full" && (
+                                <span className="text-[10px] font-semibold leading-none" style={{ color: STATE_COLOR[state] }}>F</span>
+                              )}
+                              {cell && !cell.kind && (
+                                <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: STATE_COLOR[state] }} />
                               )}
                             </div>
                           </TableCell>
@@ -384,20 +523,67 @@ export function FeedingEnrollment() {
                 </SelectContent>
               </Select>
             </div>
+            <div className="p-3 rounded-lg" style={{ backgroundColor: "var(--light-gray)" }}>
+              <p className="text-xs" style={{ color: "var(--mid-gray)" }}>
+                {payTarget?.meal === "L" ? "Lunch" : "Breakfast"} · {payMonths} month{payMonths === "1" ? "" : "s"}
+              </p>
+              <p className="text-lg font-semibold mt-1" style={{ color: "var(--dark-gray)" }}>{rwf(fullAmount)}</p>
+              <p className="text-xs mt-1" style={{ color: "var(--mid-gray)" }}>
+                {rwf(unitPrice)} × {payMonths}
+              </p>
+            </div>
+            <div>
+              <Label>Payment</Label>
+              <div className="grid grid-cols-2 gap-2 mt-2">
+                {(["full", "partial"] as const).map(kind => (
+                  <button key={kind} type="button" onClick={() => setPayKind(kind)}
+                    className="h-11 rounded-md border text-sm font-medium"
+                    style={{
+                      borderColor: payKind === kind ? "var(--maroon)" : "var(--border)",
+                      backgroundColor: payKind === kind ? "var(--maroon)" : "#FFFFFF",
+                      color: payKind === kind ? "#FFFFFF" : "var(--dark-gray)",
+                    }}>
+                    {kind === "full" ? "Full payment" : "Partial payment"}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {payKind === "partial" && (
+              <div>
+                <Label>Amount paid (RWF)</Label>
+                <Input type="number" min={1} max={fullAmount} step="1" inputMode="decimal"
+                  value={amountPaid} onChange={e => setAmountPaid(e.target.value)}
+                  placeholder={`Up to ${fullAmount}`} className="mt-2 h-11" />
+                {amountPaid !== "" && paidNumber > fullAmount && (
+                  <p className="text-sm mt-2" style={{ color: "var(--danger-red)" }}>
+                    Amount paid cannot exceed {rwf(fullAmount)}.
+                  </p>
+                )}
+                {paidNumber > 0 && paidNumber <= fullAmount && (
+                  <p className="text-sm mt-2" style={{ color: "var(--dark-gray)" }}>
+                    Left to pay: <strong>{rwf(balance)}</strong>
+                  </p>
+                )}
+              </div>
+            )}
             {payDate && (
               <div className="p-3 rounded-lg" style={{ backgroundColor: "#F0FDF4" }}>
                 <p className="text-sm" style={{ color: "var(--success-green)" }}>
                   Paid <strong>{fmtLocal(payDate)}</strong> → expires <strong>{fmtLocal(addMonths(payDate, +payMonths))}</strong>
                 </p>
                 <p className="text-xs mt-1" style={{ color: "#15803D" }}>
-                  You'll be reminded as this date approaches.
+                  {payKind === "full"
+                    ? `${rwf(fullAmount)} recorded in full.`
+                    : paidNumber > 0 && paidNumber <= fullAmount
+                      ? `${rwf(paidNumber)} received · ${rwf(balance)} left.`
+                      : "Enter the amount received."}
                 </p>
               </div>
             )}
           </div>
           <DialogFooter>
             <Button variant="ghost" onClick={() => setPayTarget(null)}>Cancel</Button>
-            <Button onClick={confirmPayment} disabled={!payDate}
+            <Button onClick={confirmPayment} disabled={!payDate || partialInvalid}
               style={{ backgroundColor: "var(--maroon)", color: "#FFFFFF" }}>
               Save Payment
             </Button>

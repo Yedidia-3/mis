@@ -8,6 +8,7 @@ import { AuditLog } from './audit-log.entity';
 import { Class } from './class.entity';
 import { CourseCatalogue } from './course-catalogue.entity';
 import { Enrollment } from './enrollment.entity';
+import { FeedingPrice } from './feeding-price.entity';
 import { Notification } from './notification.entity';
 import { PLevel } from './p-level.entity';
 import { ShuffleResult } from './shuffle-result.entity';
@@ -37,6 +38,7 @@ export const entities = [
   Class,
   CourseCatalogue,
   Enrollment,
+  FeedingPrice,
   Notification,
   PLevel,
   ShuffleResult,
@@ -60,6 +62,7 @@ export {
     Class,
     CourseCatalogue,
     Enrollment,
+    FeedingPrice,
     Notification,
     PLevel,
     ShuffleResult,

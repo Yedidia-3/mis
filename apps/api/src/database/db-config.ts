@@ -31,13 +31,18 @@ export function buildDbConnection(env: NodeJS.ProcessEnv = process.env): DbConne
     return { url: databaseUrl, ssl: { rejectUnauthorized: false } };
   }
 
+  const host = env.PGHOST || env.DB_HOST || 'localhost';
+  // cPanel Postgres is on this same machine and does not speak SSL.
+  // Managed hosts (Railway) still require it whenever NODE_ENV is production.
+  const localHost = host === 'localhost' || host === '127.0.0.1' || host === '::1';
+
   return {
-    host: env.PGHOST || env.DB_HOST || 'localhost',
+    host,
     port: Number(env.PGPORT ?? env.DB_PORT ?? 5432),
     username: env.PGUSER || env.DB_USERNAME || 'postgres',
     password: env.PGPASSWORD || env.DB_PASSWORD || '',
     database: env.PGDATABASE || env.DB_NAME || 'jericho_school',
-    ssl: isProduction ? { rejectUnauthorized: false } : false,
+    ssl: isProduction && !localHost ? { rejectUnauthorized: false } : false,
   };
 }
 

@@ -2,10 +2,12 @@ import { BadRequestException, Injectable, NotFoundException, OnModuleInit } from
 import { InjectRepository } from '@nestjs/typeorm';
 import { LessThanOrEqual, Repository } from 'typeorm';
 import { Enrollment } from '../entities/enrollment.entity';
+import { FeedingPrice } from '../entities/feeding-price.entity';
 import { Zone } from '../entities/zone.entity';
 import { Student } from '../entities/student.entity';
 import { BulkEnrollDto } from './enrollments/dto/bulk-enroll.dto';
 import { CreateEnrollmentDto } from './enrollments/dto/create-enrollment.dto';
+import { FeedingPrices, normalizeFeedingCell, roundMoney } from './feeding-payment';
 import { CreateZoneDto } from './zones/dto/create-zone.dto';
 
 @Injectable()
@@ -14,6 +16,7 @@ export class AccountantService implements OnModuleInit {
     @InjectRepository(Zone) private zoneRepo: Repository<Zone>,
     @InjectRepository(Enrollment) private enrollmentRepo: Repository<Enrollment>,
     @InjectRepository(Student) private studentRepo: Repository<Student>,
+    @InjectRepository(FeedingPrice) private priceRepo: Repository<FeedingPrice>,
   ) {}
 
   async onModuleInit() {
@@ -229,15 +232,45 @@ export class AccountantService implements OnModuleInit {
     return { created, skipped, total: uniqueStudentIds.length };
   }
 
+  // ─── Feeding prices ─────────────────────────────────────────────────────────
+
+  async getFeedingPrices(): Promise<FeedingPrices> {
+    const row = await this.ensurePrices();
+    return { breakfast: Number(row.breakfast) || 0, lunch: Number(row.lunch) || 0 };
+  }
+
+  async setFeedingPrices(breakfast: number, lunch: number): Promise<FeedingPrices> {
+    if (!Number.isFinite(breakfast) || breakfast < 0 || !Number.isFinite(lunch) || lunch < 0) {
+      throw new BadRequestException('Prices must be zero or a positive amount.');
+    }
+    const row = await this.ensurePrices();
+    row.breakfast = roundMoney(breakfast);
+    row.lunch = roundMoney(lunch);
+    await this.priceRepo.save(row);
+    return { breakfast: Number(row.breakfast), lunch: Number(row.lunch) };
+  }
+
+  private async ensurePrices(): Promise<FeedingPrice> {
+    let row = await this.priceRepo.findOne({ where: { id: 1 } });
+    if (!row) {
+      row = await this.priceRepo.save(this.priceRepo.create({ breakfast: 0, lunch: 0 }));
+    }
+    return row;
+  }
+
   // Replace the monthly payment grid for one enrollment. Each cell value is an
   // object { paid_on, months, expires_on } so we can track expiry per payment.
+  // Feeding cells also carry full / partial money, loaded from the saved prices.
   async updatePayments(id: number, payments: Record<string, any>) {
     const e = await this.enrollmentRepo.findOne({ where: { id } });
     if (!e) throw new NotFoundException('Enrollment not found');
+    const prices = e.type === 'feeding' ? await this.getFeedingPrices() : null;
     const clean: Record<string, any> = {};
     for (const [k, v] of Object.entries(payments ?? {})) {
       if (!v) continue;
-      if (typeof v === 'object' && v.paid_on) {
+      if (e.type === 'feeding' && /^[1-4][BL]$/.test(k)) {
+        clean[k] = normalizeFeedingCell(k, v, prices!);
+      } else if (typeof v === 'object' && v.paid_on) {
         clean[k] = { paid_on: v.paid_on, months: v.months ?? 1, expires_on: v.expires_on };
       } else {
         // backward-compatible: a bare truthy becomes a 1-month payment from today

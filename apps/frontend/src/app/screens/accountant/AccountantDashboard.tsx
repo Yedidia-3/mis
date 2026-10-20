@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Users, Utensils, Bus, AlertCircle, Wallet, BadgeCheck, ArrowRight } from "lucide-react";
+import { Users, Utensils, Bus, AlertCircle, Wallet, BadgeCheck, ArrowRight, CircleDollarSign } from "lucide-react";
 import { Card, CardContent } from "../../components/ui/card";
 import { Button } from "../../components/ui/button";
 import { useNavigate } from "react-router";
@@ -7,13 +7,24 @@ import { api } from "../../../lib/api";
 import { useAuth } from "../../../lib/auth";
 import { useAutoRefresh } from "../../../lib/useAutoRefresh";
 
+interface PaymentCell {
+  kind?: 'full' | 'partial';
+  amount_paid?: number;
+  balance?: number;
+  full_amount?: number;
+}
+
 interface Enrollment {
   id: number;
   type: 'feeding' | 'transport';
   student_id: number;
   expiry_date: string;
-  payments?: Record<string, any>;
+  payments?: Record<string, PaymentCell>;
   student: { id: number; name: string } | null;
+}
+
+function rwf(n: number): string {
+  return `RWF ${Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 }
 
 export function AccountantDashboard() {
@@ -22,26 +33,23 @@ export function AccountantDashboard() {
   const [feeding, setFeeding] = useState<Enrollment[]>([]);
   const [transport, setTransport] = useState<Enrollment[]>([]);
   const [expiring, setExpiring] = useState<Enrollment[]>([]);
-  const [classCount, setClassCount] = useState<number>(0);
+  const [pricesReady, setPricesReady] = useState(true);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
     try {
-      const years = await api.get<any>('/api/v1/academics/academic-years').catch(() => []);
-      const yearList = Array.isArray(years) ? years : years.data ?? [];
-      const active = yearList.find((y: any) => y.status === 'active');
-
-      const [f, t, e, classes] = await Promise.all([
+      const [f, t, e, priceRes] = await Promise.all([
         api.get<any>('/api/v1/accountant/enrollments?type=feeding').catch(() => []),
         api.get<any>('/api/v1/accountant/enrollments?type=transport').catch(() => []),
         api.get<any>('/api/v1/accountant/enrollments/expiring?days=3').catch(() => []),
-        active ? api.get<any>(`/api/v1/academics/all-classes?academic_year_id=${active.id}`).catch(() => []) : Promise.resolve([]),
+        api.get<any>('/api/v1/accountant/feeding-prices').catch(() => ({ breakfast: 0, lunch: 0 })),
       ]);
       setFeeding(Array.isArray(f) ? f : f.data ?? []);
       setTransport(Array.isArray(t) ? t : t.data ?? []);
       setExpiring(Array.isArray(e) ? e : e.data ?? []);
-      const classList = Array.isArray(classes) ? classes : classes.data ?? [];
-      setClassCount(classList.length);
+      const breakfast = Number(priceRes?.breakfast) || 0;
+      const lunch = Number(priceRes?.lunch) || 0;
+      setPricesReady(breakfast > 0 && lunch > 0);
     } finally {
       setLoading(false);
     }
@@ -50,11 +58,13 @@ export function AccountantDashboard() {
   useEffect(() => { load(); }, [load]);
   useAutoRefresh(load);
 
-  const all = [...feeding, ...transport];
-  const totalEnrolled = all.length;
-  const hasPaid = (en: Enrollment) => en.payments && Object.keys(en.payments).length > 0;
-  const studentsPaid = new Set(all.filter(hasPaid).map(en => en.student_id)).size;
-  const unpaid = new Set(all.filter(en => !hasPaid(en)).map(en => en.student_id)).size;
+  const hasPaid = (en: Enrollment) => !!en.payments && Object.keys(en.payments).length > 0;
+  const feedingCells = feeding.flatMap(en => Object.values(en.payments ?? {}));
+  const fullCells = feedingCells.filter(cell => cell?.kind !== 'partial');
+  const partialCells = feedingCells.filter(cell => cell?.kind === 'partial');
+  const studentsPaid = feeding.filter(hasPaid).length;
+  const fullCollected = fullCells.reduce((sum, cell) => sum + Number(cell.amount_paid ?? 0), 0);
+  const partialLeft = partialCells.reduce((sum, cell) => sum + Number(cell.balance ?? 0), 0);
   const expiringSoon = expiring.length;
   const today = new Date().toISOString().split('T')[0];
   const expiringToday = expiring.filter(e => e.expiry_date === today).length;
@@ -62,10 +72,10 @@ export function AccountantDashboard() {
   const firstName = (user?.name ?? "Accountant").split(" ")[0];
 
   const stats = [
-    { label: "Total Enrolled", value: totalEnrolled, sub: `${feeding.length} feeding · ${transport.length} transport`, icon: Users, color: "var(--navy-blue)" },
-    { label: "Students Paid", value: studentsPaid, sub: `${unpaid} not yet paid`, icon: BadgeCheck, color: "var(--success-green)" },
-    { label: "Expiring (3 days)", value: expiringSoon, sub: expiringToday > 0 ? `${expiringToday} today` : "none today", icon: AlertCircle, color: "var(--warning-amber)" },
-    { label: "Class Lists", value: classCount, sub: "available", icon: Wallet, color: "var(--maroon)" },
+    { label: "Total Enrolled Students", value: feeding.length, sub: "on school feeding", icon: Users, color: "var(--navy-blue)" },
+    { label: "Students Already Paid", value: studentsPaid, sub: `${Math.max(feeding.length - studentsPaid, 0)} not yet paid`, icon: BadgeCheck, color: "var(--success-green)" },
+    { label: "Full Payments", value: fullCells.length, sub: fullCollected > 0 ? `${rwf(fullCollected)} recorded` : "paid in full", icon: Wallet, color: "var(--navy-blue)" },
+    { label: "Partial Payments", value: partialCells.length, sub: partialLeft > 0 ? `${rwf(partialLeft)} still due` : "none outstanding", icon: CircleDollarSign, color: "var(--warning-amber)" },
   ];
 
   return (
@@ -82,6 +92,23 @@ export function AccountantDashboard() {
             : "No subscriptions expiring soon — finances are on track"}
         </p>
       </div>
+
+      {!loading && !pricesReady && (
+        <Card style={{ borderColor: "var(--warning-amber)" }}>
+          <CardContent className="p-5 flex flex-col sm:flex-row sm:items-center gap-3">
+            <div className="flex-1">
+              <p className="font-semibold" style={{ color: "var(--dark-gray)" }}>Meal prices are not set</p>
+              <p className="text-sm mt-1" style={{ color: "var(--mid-gray)" }}>
+                Set breakfast and lunch once on School Feeding. Each tick then loads that amount.
+              </p>
+            </div>
+            <Button onClick={() => navigate("/accountant/enrollment/feeding")}
+              style={{ backgroundColor: "var(--maroon)", color: "#FFFFFF" }}>
+              Set prices
+            </Button>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Stats */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">

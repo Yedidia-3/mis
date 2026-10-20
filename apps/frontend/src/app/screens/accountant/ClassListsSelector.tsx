@@ -25,6 +25,8 @@ export function ClassListsSelector() {
   const navigate = useNavigate();
   const [pLevels, setPLevels] = useState<PLevelSummary[]>([]);
   const [activeYearName, setActiveYearName] = useState<string>("");
+  const [studentTotal, setStudentTotal] = useState(0);
+  const [needEnrolment, setNeedEnrolment] = useState(0);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -40,28 +42,48 @@ export function ClassListsSelector() {
         }
         setActiveYearName(activeYear.name);
 
-        const res = await api.get<any>(`/api/v1/academics/all-classes?academic_year_id=${activeYear.id}`);
+        const [res, feedingRes, transportRes] = await Promise.all([
+          api.get<any>(`/api/v1/academics/all-classes?academic_year_id=${activeYear.id}`),
+          api.get<any>('/api/v1/accountant/enrollments?type=feeding').catch(() => []),
+          api.get<any>('/api/v1/accountant/enrollments?type=transport').catch(() => []),
+        ]);
         const classes: ClassItem[] = Array.isArray(res) ? res : res.data ?? [];
+        const enrolledIds = new Set<number>();
+        for (const list of [feedingRes, transportRes]) {
+          const rows = Array.isArray(list) ? list : list?.data ?? [];
+          for (const row of rows) {
+            if (row?.student_id) enrolledIds.add(row.student_id);
+          }
+        }
 
-        // Group classes by p_level
-        const map = new Map<number, PLevelSummary>();
+        // Group classes by p_level. A student is counted once even if a roster repeats them.
+        const map = new Map<number, PLevelSummary & { ids: Set<number> }>();
+        const allStudentIds = new Set<number>();
         for (const cls of classes) {
           if (!cls.p_level) continue;
           const plId = cls.p_level.id;
-          const existing = map.get(plId);
-          const studentCount = cls.students?.length ?? 0;
-          if (existing) {
-            existing.classCount += 1;
-            existing.studentCount += studentCount;
-          } else {
-            map.set(plId, {
-              id: plId,
-              name: cls.p_level.name,
-              classCount: 1,
-              studentCount,
-            });
+          const existing = map.get(plId) ?? {
+            id: plId,
+            name: cls.p_level.name,
+            classCount: 0,
+            studentCount: 0,
+            ids: new Set<number>(),
+          };
+          existing.classCount += 1;
+          for (const student of cls.students ?? []) {
+            if (student?.id == null || existing.ids.has(student.id)) continue;
+            existing.ids.add(student.id);
+            allStudentIds.add(student.id);
           }
+          existing.studentCount = existing.ids.size;
+          map.set(plId, existing);
         }
+        let waiting = 0;
+        for (const id of allStudentIds) {
+          if (!enrolledIds.has(id)) waiting += 1;
+        }
+        setStudentTotal(allStudentIds.size);
+        setNeedEnrolment(waiting);
 
         // Sort by p-level name
         const sorted = Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
@@ -108,13 +130,15 @@ export function ClassListsSelector() {
           <Card style={{ borderColor: "var(--border)" }}>
             <CardContent className="p-5">
               <p className="text-sm" style={{ color: "var(--mid-gray)" }}>Students</p>
-              <p className="text-3xl font-bold mt-1" style={{ color: "var(--dark-gray)" }}>{pLevels.reduce((sum, pl) => sum + pl.studentCount, 0)}</p>
+              <p className="text-3xl font-bold mt-1" style={{ color: "var(--dark-gray)" }}>{studentTotal}</p>
+              <p className="text-xs mt-1" style={{ color: "var(--mid-gray)" }}>on these class lists</p>
             </CardContent>
           </Card>
           <Card style={{ borderColor: "var(--border)" }}>
             <CardContent className="p-5">
               <p className="text-sm" style={{ color: "var(--mid-gray)" }}>Need Enrolment</p>
-              <p className="text-3xl font-bold mt-1" style={{ color: "var(--dark-gray)" }}>{Math.max(0, pLevels.reduce((sum, pl) => sum + pl.studentCount, 0) - pLevels.reduce((sum, pl) => sum + pl.classCount, 0))}</p>
+              <p className="text-3xl font-bold mt-1" style={{ color: "var(--dark-gray)" }}>{needEnrolment}</p>
+              <p className="text-xs mt-1" style={{ color: "var(--mid-gray)" }}>not in feeding or transport</p>
             </CardContent>
           </Card>
         </div>

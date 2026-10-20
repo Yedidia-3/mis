@@ -32,9 +32,11 @@ export class Enrollment {
 
   // Monthly payment grid.
   //  Feeding  → keys "1B","1L","2B","2L",… (month + Breakfast/Lunch)
+  //             value { paid_on, months, expires_on, kind, unit_price,
+  //                      full_amount, amount_paid, balance }
   //  Transport→ keys "1","2","3","4"        (month)
   @Column({ type: 'jsonb', default: () => "'{}'" })
-  payments: Record<string, boolean>;
+  payments: Record<string, any>;
 
   @Column({ type: 'enum', enum: ['active', 'archived'], default: 'active' })
   status: 'active' | 'archived';

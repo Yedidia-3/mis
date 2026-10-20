@@ -3,6 +3,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { AccountantService } from './accountant.service';
+import { SetFeedingPricesDto } from './dto/set-feeding-prices.dto';
 import { BulkEnrollDto } from './enrollments/dto/bulk-enroll.dto';
 import { CreateEnrollmentDto } from './enrollments/dto/create-enrollment.dto';
 import { CreateZoneDto } from './zones/dto/create-zone.dto';
@@ -12,6 +13,15 @@ import { CreateZoneDto } from './zones/dto/create-zone.dto';
 @Roles('accountant')
 export class AccountantController {
   constructor(private accountantService: AccountantService) {}
+
+  // Meal prices — set once, then every B/L tick loads them.
+  @Get('feeding-prices')
+  getFeedingPrices() { return this.accountantService.getFeedingPrices(); }
+
+  @Put('feeding-prices')
+  setFeedingPrices(@Body() dto: SetFeedingPricesDto) {
+    return this.accountantService.setFeedingPrices(dto.breakfast, dto.lunch);
+  }
 
   // Zones
   @Get('zones')
@@ -54,7 +64,7 @@ export class AccountantController {
   }
 
   @Put('enrollments/:id/payments')
-  updatePayments(@Param('id') id: string, @Body('payments') payments: Record<string, boolean>) {
+  updatePayments(@Param('id') id: string, @Body('payments') payments: Record<string, any>) {
     return this.accountantService.updatePayments(+id, payments);
   }
 
