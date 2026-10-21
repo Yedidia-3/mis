@@ -1,0 +1,45 @@
+name: Deploy to cPanel
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: cpanel-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Build API
+        working-directory: apps/api
+        run: |
+          npm install
+          npm run build
+
+      - name: Build frontend
+        working-directory: apps/frontend
+        env:
+          VITE_API_URL: https://api.jerichoschool.ac.rw
+        run: |
+          npm ci
+          npm run build
+
+      - name: Upload over SFTP and restart the API
+        env:
+          CPANEL_SSH_KEY: ${{ secrets.CPANEL_SSH_KEY }}
+          REPO_ROOT: ${{ github.workspace }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/sftp"
+          cp scripts/deploy-cpanel.mjs "$RUNNER_TEMP/sftp/deploy-cpanel.mjs"
+          cd "$RUNNER_TEMP/sftp"
+          npm init -y
+          npm install ssh2-sftp-client
+          node deploy-cpanel.mjs
