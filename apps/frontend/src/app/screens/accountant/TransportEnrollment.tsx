@@ -1,4 +1,4 @@
-import { ArrowLeft, Bus, Download, Loader2, MoreVertical, Plus, Search } from "lucide-react";
+import { ArrowLeft, Bus, Download, Loader2, MoreVertical, Plus, Search, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { toast } from "sonner";
@@ -82,6 +82,9 @@ export function TransportEnrollment() {
   const [pLevelFilter, setPLevelFilter] = useState<string>("all");
   const [classFilter, setClassFilter] = useState<string>("all");
   const [savingId, setSavingId] = useState<number | null>(null);
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const [confirmRemove, setConfirmRemove] = useState(false);
+  const [removing, setRemoving] = useState(false);
 
   const [payTarget, setPayTarget] = useState<{ e: Enrollment; key: string; label: string } | null>(null);
   const [payDate, setPayDate] = useState("");
@@ -191,9 +194,37 @@ export function TransportEnrollment() {
     try {
       await api.delete(`/api/v1/accountant/enrollments/${e.id}`);
       toast.success(`${e.student?.name ?? 'Student'} removed from transport`);
+      setSelectedIds((ids) => ids.filter((id) => id !== e.id));
       load();
     } catch (err: any) {
       toast.error(err.message ?? 'Failed to remove');
+    }
+  };
+
+  const selectedInView = selectedIds.filter((id) => filtered.some((e) => e.id === id));
+  const allVisibleSelected = filtered.length > 0 && filtered.every((e) => selectedIds.includes(e.id));
+  const toggleAll = () => {
+    const visibleIds = filtered.map((e) => e.id);
+    setSelectedIds((prev) => allVisibleSelected
+      ? prev.filter((id) => !visibleIds.includes(id))
+      : Array.from(new Set([...prev, ...visibleIds])));
+  };
+  const toggleOne = (id: number) => {
+    setSelectedIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
+  };
+  const removeSelected = async () => {
+    if (!selectedInView.length) return;
+    setRemoving(true);
+    try {
+      const res = await api.post<{ removed: number }>('/api/v1/accountant/enrollments/bulk-remove', { ids: selectedInView });
+      toast.success(`${res?.removed ?? selectedInView.length} student${selectedInView.length === 1 ? '' : 's'} removed from transport`);
+      setSelectedIds((ids) => ids.filter((id) => !selectedInView.includes(id)));
+      setConfirmRemove(false);
+      load();
+    } catch (err: any) {
+      toast.error(err.message ?? 'Failed to remove selected students');
+    } finally {
+      setRemoving(false);
     }
   };
 
@@ -272,6 +303,12 @@ export function TransportEnrollment() {
                 {classesForFilter.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
               </SelectContent>
             </Select>
+            <Button variant="outline" className="h-11" disabled={selectedInView.length === 0}
+              onClick={() => setConfirmRemove(true)}
+              style={{ borderColor: "var(--danger-red)", color: "var(--danger-red)" }}>
+              <Trash2 size={16} className="mr-2" />
+              Remove selected{selectedInView.length ? ` (${selectedInView.length})` : ""}
+            </Button>
           </div>
 
           {loading ? (
@@ -283,7 +320,7 @@ export function TransportEnrollment() {
               <Bus size={48} className="mx-auto mb-3" style={{ color: "var(--mid-gray)" }} />
               <p className="text-lg font-semibold" style={{ color: "var(--dark-gray)" }}>No students in transport</p>
               <p className="text-sm mt-2 mb-4" style={{ color: "var(--mid-gray)" }}>
-                Import students from <strong>Class Lists</strong> → toggle a P-Level → "Import to Transport".
+                Select students on a class list, then import them into transport.
               </p>
               <Button onClick={() => navigate('/accountant/class-lists')}
                 style={{ backgroundColor: "var(--maroon)", color: "#FFFFFF" }}>
@@ -295,6 +332,9 @@ export function TransportEnrollment() {
               <Table>
                 <TableHeader style={{ backgroundColor: "var(--navy-blue)" }}>
                   <TableRow>
+                    <TableHead className="text-white w-10" style={{ backgroundColor: "var(--navy-blue)" }}>
+                      <Checkbox checked={allVisibleSelected} onCheckedChange={toggleAll} className="bg-white" aria-label="Select all students in view" />
+                    </TableHead>
                     <TableHead className="text-white sticky left-0" style={{ backgroundColor: "var(--navy-blue)" }}>Name</TableHead>
                     <TableHead className="text-white">Class</TableHead>
                     {MONTHS.map((m, i) => (
@@ -307,6 +347,9 @@ export function TransportEnrollment() {
                 <TableBody>
                   {filtered.map((e, index) => (
                     <TableRow key={e.id} style={{ backgroundColor: index % 2 === 0 ? "#FFFFFF" : "var(--light-gray)" }}>
+                      <TableCell>
+                        <Checkbox checked={selectedIds.includes(e.id)} onCheckedChange={() => toggleOne(e.id)} aria-label={`Select ${e.student?.name ?? "student"}`} />
+                      </TableCell>
                       <TableCell className="font-medium sticky left-0"
                         style={{ color: "var(--dark-gray)", backgroundColor: index % 2 === 0 ? "#FFFFFF" : "var(--light-gray)" }}>
                         {e.student?.name ?? '—'}
@@ -416,6 +459,26 @@ export function TransportEnrollment() {
             <Button onClick={confirmPayment} disabled={!payDate}
               style={{ backgroundColor: "var(--maroon)", color: "#FFFFFF" }}>
               Save Payment
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={confirmRemove} onOpenChange={setConfirmRemove}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Remove selected students</DialogTitle>
+            <DialogDescription>
+              {selectedInView.length} student{selectedInView.length === 1 ? "" : "s"} will be removed from transport.
+              Their payment history stays archived.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setConfirmRemove(false)} disabled={removing}>Cancel</Button>
+            <Button onClick={removeSelected} disabled={removing || selectedInView.length === 0}
+              style={{ backgroundColor: "var(--danger-red)", color: "#FFFFFF" }}>
+              {removing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Remove {selectedInView.length}
             </Button>
           </DialogFooter>
         </DialogContent>

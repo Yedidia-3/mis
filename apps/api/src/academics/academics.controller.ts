@@ -76,7 +76,7 @@ export class AcademicsController {
   }
 
   @Delete('classes/:id')
-  @Roles('dean', 'accountant', 'super_admin')
+  @Roles('dean', 'super_admin')
   deleteClass(@Param('id') id: string) {
     return this.academicsService.deleteClass(+id);
   }
@@ -89,7 +89,7 @@ export class AcademicsController {
 
   // Students
   @Get('students')
-  @Roles('dean', 'principal', 'teacher', 'accountant', 'super_admin')
+  @Roles('dean', 'principal', 'teacher', 'super_admin')
   listStudents(
     @Query('academic_year_id') yearId?: string,
     @Query('p_level_id') pLevelId?: string,
@@ -111,7 +111,7 @@ export class AcademicsController {
   }
 
   @Post('students/import')
-  @Roles('dean', 'principal', 'teacher', 'accountant', 'super_admin')
+  @Roles('dean', 'principal', 'teacher', 'super_admin')
   @UseInterceptors(FileInterceptor('file', { storage: memoryStorage() }))
   importStudents(
     @UploadedFile() file: Express.Multer.File,
@@ -136,19 +136,19 @@ export class AcademicsController {
   }
 
   @Post('students/bulk-delete')
-  @Roles('dean', 'principal', 'teacher', 'accountant', 'super_admin')
+  @Roles('dean', 'principal', 'teacher', 'super_admin')
   deleteStudentsBulk(@Body('ids') ids: number[]) {
     return this.academicsService.deleteStudentsBulk(ids ?? []);
   }
 
   @Post('students')
-  @Roles('dean', 'principal', 'teacher', 'accountant', 'super_admin')
+  @Roles('dean', 'principal', 'teacher', 'super_admin')
   createStudent(@Body() body: any, @CurrentUser() user: User) {
     return this.academicsService.createStudent(body ?? {}, user);
   }
 
   @Get('students/:id')
-  @Roles('dean', 'principal', 'teacher', 'accountant', 'super_admin')
+  @Roles('dean', 'principal', 'teacher', 'super_admin')
   getStudent(@Param('id') id: string) {
     return this.academicsService.getStudent(+id);
   }
@@ -190,13 +190,13 @@ export class AcademicsController {
   }
 
   @Get('classes/:id/students')
-  @Roles('dean', 'principal', 'teacher', 'accountant')
+  @Roles('dean', 'principal', 'teacher')
   getStudents(@Param('id') id: string, @CurrentUser() user: User) {
     return this.academicsService.getClassStudentsForUser(+id, user);
   }
 
   @Post('classes/:id/students')
-  @Roles('dean', 'accountant', 'teacher')
+  @Roles('dean', 'teacher')
   addStudents(
     @Param('id') id: string,
     @Body('students') students: { name: string }[],
@@ -206,7 +206,7 @@ export class AcademicsController {
   }
 
   @Put('students/:id')
-  @Roles('dean', 'principal', 'teacher', 'accountant', 'super_admin')
+  @Roles('dean', 'principal', 'teacher', 'super_admin')
   updateStudent(
     @Param('id') id: string,
     @Body() body: { name?: string; student_id_number?: string; current_class_id?: number; former_class?: string; rank?: number | string; marks_percentage?: number | string; status?: string },
@@ -216,7 +216,7 @@ export class AcademicsController {
   }
 
   @Delete('students/:id')
-  @Roles('dean', 'principal', 'teacher', 'accountant', 'super_admin')
+  @Roles('dean', 'principal', 'teacher', 'super_admin')
   removeStudentFromClass(@Param('id') id: string, @CurrentUser() user: User) {
     if (user.role === 'teacher') {
       return this.academicsService.removeStudentFromClassForUser(+id, user);
@@ -232,7 +232,7 @@ export class AcademicsController {
 
   // Excel import (legacy dean import)
   @Post('p-levels/:id/import')
-  @Roles('dean', 'principal', 'teacher', 'accountant', 'super_admin')
+  @Roles('dean', 'principal', 'teacher', 'super_admin')
   @UseInterceptors(FileInterceptor('file', { storage: memoryStorage() }))
   importExcel(
     @Param('id') id: string,
@@ -302,7 +302,7 @@ export class AcademicsController {
 
   // Distribution Module
   @Get('distribution/summary')
-  @Roles('dean', 'principal', 'super_admin', 'accountant')
+  @Roles('dean', 'principal', 'super_admin')
   getDistributionSummary(@Query('academic_year_id') yearId?: string) {
     return this.academicsService.getDistributionSummary(yearId ? +yearId : undefined);
   }
@@ -325,13 +325,13 @@ export class AcademicsController {
   // Accountant portal
   @Get('all-classes')
   @Roles('accountant')
-  getAllClasses(@Query('academic_year_id') yearId?: string) {
-    return this.academicsService.getAllDistributedClasses(yearId ? +yearId : undefined);
+  getAllClasses(@Query('academic_year_id') yearId: string | undefined, @CurrentUser() user: User) {
+    return this.academicsService.getAllDistributedClasses(yearId ? +yearId : undefined, user.id);
   }
 
   // Export class list as .xlsx or .docx
   @Get('classes/:id/export')
-  @Roles('dean', 'principal', 'teacher', 'accountant')
+  @Roles('dean', 'principal', 'teacher')
   async exportClassList(
     @Param('id') id: string,
     @Query('format') format: string,

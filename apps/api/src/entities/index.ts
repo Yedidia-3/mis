@@ -1,4 +1,5 @@
 import { AcademicYear } from './academic-year.entity';
+import { AccountantRosterStudent } from './accountant-roster-student.entity';
 import { AssessmentScore } from './assessment-score.entity';
 import { AssessmentType } from './assessment-type.entity';
 import { Assessment } from './assessment.entity';
@@ -29,6 +30,7 @@ import { Zone } from './zone.entity';
  */
 export const entities = [
   AcademicYear,
+  AccountantRosterStudent,
   Assessment,
   AssessmentScore,
   AssessmentType,
@@ -53,6 +55,7 @@ export const entities = [
 
 export {
     AcademicYear,
+    AccountantRosterStudent,
     Assessment,
     AssessmentScore,
     AssessmentType,

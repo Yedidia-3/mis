@@ -350,13 +350,23 @@ export class ShuffleService {
 
     if (seniorStaffId) {
       const user = await this.userRepo.findOne({ where: { id: seniorStaffId } });
-      const label = user ? `${user.role === 'principal' ? 'Principal' : 'Accountant'} ${user.name}` : 'Senior staff member';
-      await this.notificationsService.notify(
-        seniorStaffId,
-        `${label} has been assigned the ${session.p_level_id ? 'new class list' : 'distributed class list'} for review.`,
-        'success',
-      );
+      if (user && user.role !== 'accountant') {
+        const label = user.role === 'principal' ? 'Principal' : user.role;
+        await this.notificationsService.notify(
+          seniorStaffId,
+          `${label} ${user.name} has been assigned the new class list for review.`,
+          'success',
+        );
+      }
     }
+
+    const level = session.p_level_id
+      ? await this.pLevelRepo.findOne({ where: { id: session.p_level_id } })
+      : null;
+    await this.notificationsService.notifyAccountantsOfDistribution(
+      level ? `${level.name} class list` : 'A class list',
+      distributedClassIds,
+    );
 
     for (const ta of teacherAssignments) {
       if (!ta.teacher_id) continue;

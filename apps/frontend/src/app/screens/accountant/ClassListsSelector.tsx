@@ -1,17 +1,25 @@
 import { GraduationCap, Loader2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { toast } from "sonner";
 import { api } from "../../../lib/api";
 import { Button } from "../../components/ui/button";
 import { Card, CardContent } from "../../components/ui/card";
 
-interface ClassItem {
+interface RosterStudent {
   id: number;
-  name: string;
-  p_level_id: number;
-  p_level: { id: number; name: string; };
-  students: { id: number; }[];
+  p_level_id: number | null;
+  p_level_name: string;
+  class_id: number | null;
+  current_class: string;
+}
+
+interface RosterResponse {
+  has_copy: boolean;
+  needs_accept: boolean;
+  distributed_class_count: number;
+  pending_notices: { id: number; message: string }[];
+  students: RosterStudent[];
 }
 
 interface PLevelSummary {
@@ -24,78 +32,96 @@ interface PLevelSummary {
 export function ClassListsSelector() {
   const navigate = useNavigate();
   const [pLevels, setPLevels] = useState<PLevelSummary[]>([]);
-  const [activeYearName, setActiveYearName] = useState<string>("");
+  const [activeYearName, setActiveYearName] = useState("");
   const [studentTotal, setStudentTotal] = useState(0);
   const [needEnrolment, setNeedEnrolment] = useState(0);
+  const [needsAccept, setNeedsAccept] = useState(false);
+  const [distributedCount, setDistributedCount] = useState(0);
+  const [pendingCount, setPendingCount] = useState(0);
+  const [accepting, setAccepting] = useState(false);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    const load = async () => {
-      try {
-        const years = await api.get<any>('/api/v1/academics/academic-years');
-        const yearsList = Array.isArray(years) ? years : (years as any).data ?? [];
-        const activeYear = yearsList.find((y: any) => y.status === 'active');
-        if (!activeYear) {
-          toast.error('No active academic year');
-          setLoading(false);
-          return;
-        }
-        setActiveYearName(activeYear.name);
-
-        const [res, feedingRes, transportRes] = await Promise.all([
-          api.get<any>(`/api/v1/academics/all-classes?academic_year_id=${activeYear.id}`),
-          api.get<any>('/api/v1/accountant/enrollments?type=feeding').catch(() => []),
-          api.get<any>('/api/v1/accountant/enrollments?type=transport').catch(() => []),
-        ]);
-        const classes: ClassItem[] = Array.isArray(res) ? res : res.data ?? [];
-        const enrolledIds = new Set<number>();
-        for (const list of [feedingRes, transportRes]) {
-          const rows = Array.isArray(list) ? list : list?.data ?? [];
-          for (const row of rows) {
-            if (row?.student_id) enrolledIds.add(row.student_id);
-          }
-        }
-
-        // Group classes by p_level. A student is counted once even if a roster repeats them.
-        const map = new Map<number, PLevelSummary & { ids: Set<number> }>();
-        const allStudentIds = new Set<number>();
-        for (const cls of classes) {
-          if (!cls.p_level) continue;
-          const plId = cls.p_level.id;
-          const existing = map.get(plId) ?? {
-            id: plId,
-            name: cls.p_level.name,
-            classCount: 0,
-            studentCount: 0,
-            ids: new Set<number>(),
-          };
-          existing.classCount += 1;
-          for (const student of cls.students ?? []) {
-            if (student?.id == null || existing.ids.has(student.id)) continue;
-            existing.ids.add(student.id);
-            allStudentIds.add(student.id);
-          }
-          existing.studentCount = existing.ids.size;
-          map.set(plId, existing);
-        }
-        let waiting = 0;
-        for (const id of allStudentIds) {
-          if (!enrolledIds.has(id)) waiting += 1;
-        }
-        setStudentTotal(allStudentIds.size);
-        setNeedEnrolment(waiting);
-
-        // Sort by p-level name
-        const sorted = Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
-        setPLevels(sorted);
-      } catch {
-        toast.error('Failed to load class lists');
-      } finally {
+  const load = useCallback(async () => {
+    try {
+      const years = await api.get<any>('/api/v1/academics/academic-years');
+      const yearsList = Array.isArray(years) ? years : years.data ?? [];
+      const activeYear = yearsList.find((y: any) => y.status === 'active');
+      if (!activeYear) {
+        toast.error('No active academic year');
         setLoading(false);
+        return;
       }
-    };
-    load();
+      setActiveYearName(activeYear.name);
+
+      const [roster, feedingRes, transportRes] = await Promise.all([
+        api.get<RosterResponse>('/api/v1/accountant/roster'),
+        api.get<any>('/api/v1/accountant/enrollments?type=feeding').catch(() => []),
+        api.get<any>('/api/v1/accountant/enrollments?type=transport').catch(() => []),
+      ]);
+      const students = roster?.students ?? [];
+      setNeedsAccept(!!roster?.needs_accept);
+      setDistributedCount(roster?.distributed_class_count ?? 0);
+      setPendingCount(roster?.pending_notices?.length ?? 0);
+
+      const enrolledIds = new Set<number>();
+      for (const list of [feedingRes, transportRes]) {
+        const rows = Array.isArray(list) ? list : list?.data ?? [];
+        for (const row of rows) {
+          if (row?.student_id) enrolledIds.add(row.student_id);
+        }
+      }
+
+      const map = new Map<number, PLevelSummary & { classIds: Set<number> }>();
+      const allStudentIds = new Set<number>();
+      for (const student of students) {
+        if (student.p_level_id == null) continue;
+        const existing = map.get(student.p_level_id) ?? {
+          id: student.p_level_id,
+          name: student.p_level_name,
+          classCount: 0,
+          studentCount: 0,
+          classIds: new Set<number>(),
+        };
+        if (student.class_id != null && !existing.classIds.has(student.class_id)) {
+          existing.classIds.add(student.class_id);
+          existing.classCount = existing.classIds.size;
+        }
+        if (!allStudentIds.has(student.id)) {
+          existing.studentCount += 1;
+          allStudentIds.add(student.id);
+        }
+        map.set(student.p_level_id, existing);
+      }
+
+      let waiting = 0;
+      for (const id of allStudentIds) {
+        if (!enrolledIds.has(id)) waiting += 1;
+      }
+      setStudentTotal(allStudentIds.size);
+      setNeedEnrolment(waiting);
+      setPLevels(Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name)));
+    } catch {
+      toast.error('Failed to load class lists');
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const accept = async () => {
+    setAccepting(true);
+    try {
+      const res = await api.post<{ copied: number; message: string }>('/api/v1/accountant/roster/accept', {});
+      toast.success(res?.message ?? 'Class list received');
+      setLoading(true);
+      await load();
+    } catch (err: any) {
+      toast.error(err.message ?? 'Could not accept the class list');
+    } finally {
+      setAccepting(false);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -103,7 +129,7 @@ export function ClassListsSelector() {
         <div>
           <h1 className="text-2xl font-semibold" style={{ color: "var(--dark-gray)" }}>Class Lists</h1>
           <p className="text-sm mt-1" style={{ color: "var(--mid-gray)" }}>
-            View distributed student class rosters by level
+            Your accepted copy: student ID, name, and class. Select students here to import them into enrollment.
           </p>
         </div>
         {activeYearName && (
@@ -112,6 +138,26 @@ export function ClassListsSelector() {
           </span>
         )}
       </div>
+
+      {!loading && needsAccept && (
+        <Card style={{ borderColor: "var(--warning-amber)" }}>
+          <CardContent className="p-5 flex flex-col sm:flex-row sm:items-center gap-3">
+            <div className="flex-1">
+              <p className="font-semibold" style={{ color: "var(--dark-gray)" }}>
+                {pendingCount > 0 ? 'A class list is waiting for you' : 'Distributed classes are ready'}
+              </p>
+              <p className="text-sm mt-1" style={{ color: "var(--mid-gray)" }}>
+                Accept to receive a copy with student ID, name, and current class only.
+                {distributedCount > 0 ? ` ${distributedCount} class${distributedCount === 1 ? '' : 'es'} distributed.` : ''}
+              </p>
+            </div>
+            <Button onClick={accept} disabled={accepting} style={{ backgroundColor: "var(--maroon)", color: "#FFFFFF" }}>
+              {accepting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Accept
+            </Button>
+          </CardContent>
+        </Card>
+      )}
 
       {!loading && pLevels.length > 0 && (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
@@ -131,7 +177,7 @@ export function ClassListsSelector() {
             <CardContent className="p-5">
               <p className="text-sm" style={{ color: "var(--mid-gray)" }}>Students</p>
               <p className="text-3xl font-bold mt-1" style={{ color: "var(--dark-gray)" }}>{studentTotal}</p>
-              <p className="text-xs mt-1" style={{ color: "var(--mid-gray)" }}>on these class lists</p>
+              <p className="text-xs mt-1" style={{ color: "var(--mid-gray)" }}>on your copy</p>
             </CardContent>
           </Card>
           <Card style={{ borderColor: "var(--border)" }}>
@@ -151,9 +197,11 @@ export function ClassListsSelector() {
       ) : pLevels.length === 0 ? (
         <div className="text-center py-16 border rounded-lg" style={{ borderColor: "var(--border)" }}>
           <GraduationCap size={48} className="mx-auto mb-3" style={{ color: "var(--mid-gray)" }} />
-          <p className="text-lg font-semibold" style={{ color: "var(--dark-gray)" }}>No Class Lists Available</p>
+          <p className="text-lg font-semibold" style={{ color: "var(--dark-gray)" }}>No class list copy yet</p>
           <p className="text-sm mt-2" style={{ color: "var(--mid-gray)" }}>
-            Class lists become available after the Dean distributes the shuffle results.
+            {distributedCount > 0
+              ? 'Accept the notice above to receive student ID, name, and class.'
+              : 'You will get one notification after the Dean distributes classes. Accept it to receive your copy.'}
           </p>
         </div>
       ) : (
@@ -170,11 +218,10 @@ export function ClassListsSelector() {
                     <h3 className="text-2xl font-bold" style={{ color: "var(--dark-gray)" }}>{pl.name}</h3>
                     <span className="inline-block px-2 py-1 rounded text-xs font-semibold text-white mt-1"
                       style={{ backgroundColor: "var(--success-green)" }}>
-                      Active
+                      Accepted
                     </span>
                   </div>
                 </div>
-
                 <div className="space-y-3 mb-4">
                   <div className="flex justify-between">
                     <span className="text-sm" style={{ color: "var(--mid-gray)" }}>Classes:</span>
@@ -185,10 +232,9 @@ export function ClassListsSelector() {
                     <span className="font-semibold" style={{ color: "var(--dark-gray)" }}>{pl.studentCount}</span>
                   </div>
                 </div>
-
                 <Button onClick={() => navigate(`/accountant/class-lists/${pl.id}`)}
                   className="w-full" style={{ backgroundColor: "var(--maroon)", color: "#FFFFFF" }}>
-                  View Classes
+                  Select students
                 </Button>
               </CardContent>
             </Card>

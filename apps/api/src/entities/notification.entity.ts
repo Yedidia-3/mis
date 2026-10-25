@@ -25,6 +25,16 @@ export class Notification {
   @Column({ type: 'text', nullable: true })
   link: string | null;
 
+  // Set when the recipient must accept before anything is copied into their portal.
+  @Column({ default: false })
+  requires_action: boolean;
+
+  @Column({ type: 'varchar', length: 20, nullable: true })
+  action_status: 'pending' | 'accepted' | null;
+
+  @Column({ type: 'jsonb', nullable: true })
+  meta: Record<string, any> | null;
+
   @CreateDateColumn()
   created_at: Date;
 

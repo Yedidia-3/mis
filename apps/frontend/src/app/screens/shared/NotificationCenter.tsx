@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/card";
 import { Button } from "../../components/ui/button";
+import { toast } from "sonner";
 import { api } from "../../../lib/api";
 import { useAuth } from "../../../lib/auth";
 import { useAutoRefresh } from "../../../lib/useAutoRefresh";
@@ -18,6 +19,8 @@ interface Notification {
   created_at: string;
   /** Set by the server for notifications that point somewhere specific. */
   link?: string | null;
+  requires_action?: boolean;
+  action_status?: "pending" | "accepted" | null;
 }
 
 function timeAgo(date: string) {
@@ -68,6 +71,7 @@ export function NotificationCenter() {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<FilterMode>("all");
+  const [acceptingId, setAcceptingId] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -97,9 +101,26 @@ export function NotificationCenter() {
   };
 
   const handleClick = (n: Notification) => {
+    if (n.requires_action && n.action_status === "pending") return;
     if (!n.is_read) markRead(n.id);
     const dest = routeFor(n, user?.role);
     if (dest) navigate(dest);
+  };
+
+  const acceptDistribution = async (n: Notification) => {
+    setAcceptingId(n.id);
+    try {
+      await api.post('/api/v1/accountant/roster/accept', { notification_id: n.id });
+      setNotifications((list) => list.map((item) => item.requires_action && item.action_status === "pending"
+        ? { ...item, is_read: true, action_status: "accepted" }
+        : item));
+      toast.success("Class list received");
+      navigate("/accountant/class-lists");
+    } catch (err: any) {
+      toast.error(err.message ?? "Could not accept the class list");
+    } finally {
+      setAcceptingId(null);
+    }
   };
 
   return (
@@ -158,13 +179,17 @@ export function NotificationCenter() {
                 const meta = TYPE_META[n.type] ?? TYPE_META.info;
                 const Icon = meta.Icon;
                 const clickable = !!routeFor(n, user?.role);
+                const canAccept = user?.role === "accountant" && n.requires_action && n.action_status === "pending";
                 return (
-                  <button
+                  <div
                     key={n.id}
-                    onClick={() => handleClick(n)}
                     className="w-full text-left p-4 hover:bg-gray-50 transition-colors flex items-start gap-3"
                     style={{ backgroundColor: n.is_read ? "#FFFFFF" : "#FBFAF8" }}
                   >
+                    <button
+                      onClick={() => handleClick(n)}
+                      className="flex flex-1 items-start gap-3 text-left min-w-0"
+                    >
                     {/* Type icon */}
                     <div className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5"
                       style={{ backgroundColor: meta.bg }}>
@@ -184,14 +209,24 @@ export function NotificationCenter() {
                       </div>
                       <div className="flex items-center gap-2 mt-1">
                         <p className="text-xs" style={{ color: "var(--mid-gray)" }}>{timeAgo(n.created_at)}</p>
-                        {clickable && (
+                        {canAccept ? (
+                          <span className="text-xs font-medium" style={{ color: "var(--maroon)" }}>Accept to receive student ID, name, and class</span>
+                        ) : clickable && (
                           <span className="text-xs font-medium" style={{ color: "var(--maroon)" }}>· View</span>
                         )}
                       </div>
                     </div>
 
-                    {n.is_read && <Check size={16} style={{ color: "var(--success-green)" }} className="flex-shrink-0 mt-1" />}
-                  </button>
+                    {n.is_read && !canAccept && <Check size={16} style={{ color: "var(--success-green)" }} className="flex-shrink-0 mt-1" />}
+                    </button>
+                    {canAccept && (
+                      <Button size="sm" disabled={acceptingId === n.id}
+                        onClick={() => acceptDistribution(n)}
+                        style={{ backgroundColor: "var(--maroon)", color: "#FFFFFF" }}>
+                        {acceptingId === n.id ? <Loader2 className="h-4 w-4 animate-spin" /> : "Accept"}
+                      </Button>
+                    )}
+                  </div>
                 );
               })}
             </div>

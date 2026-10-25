@@ -1,10 +1,14 @@
 import { Body, Controller, Delete, Get, Param, Post, Put, Query, UseGuards } from '@nestjs/common';
+import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/roles.decorator';
+import { User } from '../entities/user.entity';
 import { AccountantService } from './accountant.service';
+import { AcceptRosterDto } from './dto/accept-roster.dto';
 import { SetFeedingPricesDto } from './dto/set-feeding-prices.dto';
 import { BulkEnrollDto } from './enrollments/dto/bulk-enroll.dto';
+import { BulkRemoveEnrollmentsDto } from './enrollments/dto/bulk-remove.dto';
 import { CreateEnrollmentDto } from './enrollments/dto/create-enrollment.dto';
 import { CreateZoneDto } from './zones/dto/create-zone.dto';
 
@@ -48,7 +52,24 @@ export class AccountantController {
   createEnrollment(@Body() dto: CreateEnrollmentDto) { return this.accountantService.createEnrollment(dto); }
 
   @Post('enrollments/bulk')
-  bulkEnroll(@Body() dto: BulkEnrollDto) { return this.accountantService.bulkEnroll(dto); }
+  bulkEnroll(@Body() dto: BulkEnrollDto, @CurrentUser() user: User) {
+    return this.accountantService.bulkEnroll(dto, user.id);
+  }
+
+  @Post('enrollments/bulk-remove')
+  bulkRemove(@Body() dto: BulkRemoveEnrollmentsDto) {
+    return this.accountantService.archiveEnrollments(dto.ids);
+  }
+
+  @Get('roster')
+  listRoster(@CurrentUser() user: User) {
+    return this.accountantService.listRoster(user.id);
+  }
+
+  @Post('roster/accept')
+  acceptRoster(@CurrentUser() user: User, @Body() dto: AcceptRosterDto) {
+    return this.accountantService.acceptRoster(user.id, dto?.notification_id);
+  }
 
   @Delete('enrollments/by-student/:studentId')
   waiveByStudent(

@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { LessThanOrEqual, Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { Enrollment } from '../entities/enrollment.entity';
 import { FeedingPrice } from '../entities/feeding-price.entity';
 import { Zone } from '../entities/zone.entity';
@@ -17,6 +17,7 @@ export class AccountantService implements OnModuleInit {
     @InjectRepository(Enrollment) private enrollmentRepo: Repository<Enrollment>,
     @InjectRepository(Student) private studentRepo: Repository<Student>,
     @InjectRepository(FeedingPrice) private priceRepo: Repository<FeedingPrice>,
+    private dataSource: DataSource,
   ) {}
 
   async onModuleInit() {
@@ -205,12 +206,13 @@ export class AccountantService implements OnModuleInit {
   // Import a whole distributed class/p-level into feeding or transport as a
   // MEMBERSHIP (no payment yet). The accountant then ticks the monthly B/L
   // boxes in the Feeding/Transport grid. Already-enrolled students are skipped.
-  async bulkEnroll(dto: BulkEnrollDto) {
+  async bulkEnroll(dto: BulkEnrollDto, userId: number) {
     let created = 0;
     let skipped = 0;
 
     // Prune any duplicate student IDs from the request batch
     const uniqueStudentIds = Array.from(new Set(dto.student_ids ?? []));
+    await this.assertStudentsOnRoster(userId, uniqueStudentIds);
 
     for (const sid of uniqueStudentIds) {
       const existing = await this.enrollmentRepo.findOne({
@@ -312,6 +314,168 @@ export class AccountantService implements OnModuleInit {
     enrollment.status = 'archived';
     await this.enrollmentRepo.save(enrollment);
     return { message: 'Enrollment archived' };
+  }
+
+  async archiveEnrollments(ids: number[]) {
+    const unique = [...new Set((ids ?? []).map(Number).filter((id) => Number.isFinite(id)))];
+    if (!unique.length) throw new BadRequestException('Select at least one student.');
+    let removed = 0;
+    for (const id of unique) {
+      const enrollment = await this.enrollmentRepo.findOne({ where: { id, status: 'active' } });
+      if (!enrollment) continue;
+      enrollment.status = 'archived';
+      await this.enrollmentRepo.save(enrollment);
+      removed++;
+    }
+    return { removed };
+  }
+
+  // ─── Accepted class-list copy ────────────────────────────────────────────────
+
+  async listRoster(userId: number) {
+    const yearId = await this.activeYearId();
+    if (!yearId) {
+      return { has_copy: false, needs_accept: false, distributed_class_count: 0, pending_notices: [], students: [] };
+    }
+
+    const [rows, pending, distributed] = await Promise.all([
+      this.enrollmentRepo.query(
+        `SELECT student_id, student_id_number, student_name, class_id, class_name, p_level_id, p_level_name
+         FROM accountant_roster_students
+         WHERE user_id = $1 AND academic_year_id = $2
+         ORDER BY p_level_name ASC, class_name ASC, student_name ASC`,
+        [userId, yearId],
+      ),
+      this.enrollmentRepo.query(
+        `SELECT id, message, created_at
+         FROM notifications
+         WHERE user_id = $1
+           AND requires_action = true
+           AND action_status = 'pending'
+           AND meta->>'kind' = 'distribution'
+         ORDER BY created_at ASC`,
+        [userId],
+      ),
+      this.enrollmentRepo.query(
+        `SELECT COUNT(*)::int AS count
+         FROM classes c
+         JOIN p_levels pl ON pl.id = c.p_level_id
+         WHERE pl.academic_year_id = $1
+           AND pl.status = 'active'
+           AND c.status = 'active'
+           AND c.distributed_at IS NOT NULL`,
+        [yearId],
+      ),
+    ]);
+
+    const students = rows.map((r: any) => ({
+      id: Number(r.student_id),
+      student_id: r.student_id_number || String(r.student_id),
+      name: r.student_name,
+      class_id: r.class_id == null ? null : Number(r.class_id),
+      class_name: r.class_name,
+      p_level_id: r.p_level_id == null ? null : Number(r.p_level_id),
+      p_level_name: r.p_level_name,
+      current_class: `${r.p_level_name}${r.class_name}`,
+    }));
+    const distributedClassCount = Number(distributed[0]?.count ?? 0);
+    const pendingNotices = pending.map((n: any) => ({
+      id: Number(n.id),
+      message: n.message,
+      created_at: n.created_at,
+    }));
+
+    return {
+      has_copy: students.length > 0,
+      needs_accept: pendingNotices.length > 0 || (distributedClassCount > 0 && students.length === 0),
+      distributed_class_count: distributedClassCount,
+      pending_notices: pendingNotices,
+      students,
+    };
+  }
+
+  async acceptRoster(userId: number, notificationId?: number) {
+    const yearId = await this.activeYearId();
+    if (!yearId) throw new BadRequestException('No active academic year.');
+
+    if (notificationId) {
+      const notice = await this.enrollmentRepo.query(
+        `SELECT id, action_status, meta FROM notifications
+         WHERE id = $1 AND user_id = $2 AND requires_action = true AND meta->>'kind' = 'distribution'`,
+        [notificationId, userId],
+      );
+      if (!notice.length) throw new NotFoundException('Distribution notice not found.');
+      if (notice[0].action_status === 'accepted') {
+        throw new BadRequestException('This distribution was already accepted.');
+      }
+    }
+
+    const distributed = await this.enrollmentRepo.query(
+      `SELECT COUNT(*)::int AS count
+       FROM classes c
+       JOIN p_levels pl ON pl.id = c.p_level_id
+       WHERE pl.academic_year_id = $1
+         AND pl.status = 'active'
+         AND c.status = 'active'
+         AND c.distributed_at IS NOT NULL`,
+      [yearId],
+    );
+    if (!Number(distributed[0]?.count ?? 0)) {
+      throw new BadRequestException('Nothing has been distributed yet.');
+    }
+
+    let copied = 0;
+    await this.dataSource.transaction(async (manager) => {
+      await manager.query(
+        `DELETE FROM accountant_roster_students WHERE user_id = $1 AND academic_year_id = $2`,
+        [userId, yearId],
+      );
+      const inserted = await manager.query(
+        `INSERT INTO accountant_roster_students
+           (user_id, academic_year_id, student_id, student_id_number, student_name,
+            class_id, class_name, p_level_id, p_level_name, accepted_at)
+         SELECT $1, $2, s.id, s.student_id_number, s.name,
+                c.id, c.name, pl.id, pl.name, NOW()
+         FROM students s
+         JOIN classes c ON c.id = s.current_class_id
+         JOIN p_levels pl ON pl.id = c.p_level_id
+         WHERE pl.academic_year_id = $2
+           AND pl.status = 'active'
+           AND c.status = 'active'
+           AND c.distributed_at IS NOT NULL
+           AND s.status::text <> 'transferred'
+         RETURNING id`,
+        [userId, yearId],
+      );
+      const insertedRows = Array.isArray(inserted) ? inserted : (inserted?.rows ?? []);
+      copied = insertedRows.length;
+      await manager.query(
+        `UPDATE notifications
+         SET action_status = 'accepted', is_read = true
+         WHERE user_id = $1
+           AND requires_action = true
+           AND action_status = 'pending'
+           AND meta->>'kind' = 'distribution'`,
+        [userId],
+      );
+    });
+
+    return { copied, message: `Received ${copied} student${copied === 1 ? '' : 's'}.` };
+  }
+
+  private async assertStudentsOnRoster(userId: number, studentIds: number[]) {
+    const yearId = await this.activeYearId();
+    if (!yearId || !studentIds.length) {
+      throw new BadRequestException('Accept the distributed class list before importing students.');
+    }
+    const rows = await this.enrollmentRepo.query(
+      `SELECT student_id FROM accountant_roster_students
+       WHERE user_id = $1 AND academic_year_id = $2 AND student_id = ANY($3::int[])`,
+      [userId, yearId, studentIds],
+    );
+    if (rows.length !== studentIds.length) {
+      throw new BadRequestException('You can only import students from your accepted class list.');
+    }
   }
 
   // Expand each enrollment's payment cells; return one row per cell whose

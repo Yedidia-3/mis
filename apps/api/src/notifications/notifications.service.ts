@@ -20,8 +20,21 @@ export class NotificationsService {
     message: string,
     type: 'info' | 'success' | 'warning' | 'error' = 'info',
     link: string | null = null,
+    extra?: {
+      requiresAction?: boolean;
+      actionStatus?: 'pending' | 'accepted' | null;
+      meta?: Record<string, any> | null;
+    },
   ) {
-    const notification = this.notificationRepo.create({ user_id: userId, message, type, link });
+    const notification = this.notificationRepo.create({
+      user_id: userId,
+      message,
+      type,
+      link,
+      requires_action: extra?.requiresAction ?? false,
+      action_status: extra?.actionStatus ?? null,
+      meta: extra?.meta ?? null,
+    });
     const saved = await this.notificationRepo.save(notification);
 
     // Push real-time via WebSocket if gateway is available
@@ -59,6 +72,28 @@ export class NotificationsService {
 
     return Promise.all(
       recipients.map((r) => this.notify(r.id, message, type, link)),
+    );
+  }
+
+  /**
+   * One notice per accountant for a distribution. Accepting it copies the
+   * distributed students into her portal with student ID, name, and class only.
+   */
+  async notifyAccountantsOfDistribution(label: string, classIds: number[]) {
+    const ids = [...new Set((classIds ?? []).map(Number).filter((id) => Number.isFinite(id)))];
+    if (!ids.length) return [];
+
+    const recipients: { id: number }[] = await this.notificationRepo.query(
+      `SELECT id FROM users WHERE role::text = 'accountant' AND status = 'active'`,
+    );
+
+    const message = `${label} has been distributed. Accept this notice to receive your copy: student ID, name, and class.`;
+    return Promise.all(
+      recipients.map((r) => this.notify(r.id, message, 'success', '/accountant/class-lists', {
+        requiresAction: true,
+        actionStatus: 'pending',
+        meta: { kind: 'distribution', class_ids: ids },
+      })),
     );
   }
 

@@ -1674,10 +1674,14 @@ export class AcademicsService {
     }
 
     await this.notificationsService.notifyRoles(
-      ['accountant', 'dean', 'principal'],
+      ['dean', 'principal'],
       `Class list for ${cls.p_level?.name}${saved.name} (${cls.p_level?.academic_year?.name}) has been distributed and is active.`,
       'success',
-      '/accountant/class-lists',
+      '/dean/distribution',
+    );
+    await this.notificationsService.notifyAccountantsOfDistribution(
+      `Class ${cls.p_level?.name ?? ''}${saved.name}`,
+      [saved.id],
     );
 
     return {
@@ -1731,10 +1735,14 @@ export class AcademicsService {
     }
 
     await this.notificationsService.notifyRoles(
-      ['accountant', 'dean', 'principal'],
+      ['dean', 'principal'],
       `Classes in ${pl.name} (${pl.academic_year?.name}) have been distributed and are active.`,
       'success',
-      '/accountant/class-lists',
+      '/dean/distribution',
+    );
+    await this.notificationsService.notifyAccountantsOfDistribution(
+      `Classes in ${pl.name}`,
+      distributed.map((cls) => cls.id),
     );
 
     return {
@@ -1746,7 +1754,7 @@ export class AcademicsService {
 
   // ─── Accountant portal ───────────────────────────────────────────────────────
 
-  async getAllDistributedClasses(academicYearId?: number) {
+  async getAllDistributedClasses(academicYearId: number | undefined, userId: number) {
     let yearId = academicYearId;
     if (!yearId || isNaN(yearId)) {
       const active = await this.yearRepo.findOne({ where: { status: 'active' }, order: { created_at: 'DESC' } });
@@ -1754,56 +1762,34 @@ export class AcademicsService {
       yearId = active.id;
     }
 
-    // Distributed classes visible to accountant
-    const classes = await this.classRepo.query(
-      `SELECT c.id, c.name, c.p_level_id, pl.name AS p_level_name, ay.id AS academic_year_id, ay.name AS academic_year_name,
-              c.teacher_id, t.name AS teacher_name, c.distributed_at
-       FROM classes c
-       JOIN p_levels pl ON pl.id = c.p_level_id
-       JOIN academic_years ay ON ay.id = pl.academic_year_id
-       LEFT JOIN users t ON t.id = c.teacher_id
-       WHERE pl.academic_year_id = $1
-         AND pl.status = 'active'
-         AND c.status = 'active'
-         AND c.distributed_at IS NOT NULL
-       ORDER BY pl.name ASC, c.name ASC`,
-      [yearId],
-    );
-    if (!classes.length) return [];
-
-    const classIds = classes.map((c: any) => c.id);
-    const students = await this.studentRepo.query(
-      `SELECT id, student_id_number, name, rank, marks_percentage, former_class, current_class_id, approval_status, is_imported, created_at
-       FROM students
-       WHERE current_class_id = ANY($1)
-       ORDER BY rank ASC NULLS LAST, name ASC`,
-      [classIds],
+    const rows = await this.studentRepo.query(
+      `SELECT student_id, student_id_number, student_name, class_id, class_name, p_level_id, p_level_name
+       FROM accountant_roster_students
+       WHERE user_id = $1 AND academic_year_id = $2
+       ORDER BY p_level_name ASC, class_name ASC, student_name ASC`,
+      [userId, yearId],
     );
 
-    const byClass = new Map<number, any[]>();
-    for (const s of students) {
-      if (!byClass.has(s.current_class_id)) byClass.set(s.current_class_id, []);
-      byClass.get(s.current_class_id)!.push({
-        id: s.id,
+    const byClass = new Map<number, any>();
+    for (const s of rows) {
+      const classId = Number(s.class_id);
+      if (!byClass.has(classId)) {
+        byClass.set(classId, {
+          id: classId,
+          name: s.class_name,
+          p_level: { id: Number(s.p_level_id), name: s.p_level_name },
+          student_count: 0,
+          students: [],
+        });
+      }
+      const bucket = byClass.get(classId);
+      bucket.students.push({
+        id: Number(s.student_id),
         student_id_number: s.student_id_number,
-        name: s.name,
-        rank: s.rank,
-        marks_percentage: s.marks_percentage,
-        former_class: s.former_class,
-        approval_status: s.approval_status,
-        is_imported: s.is_imported,
+        name: s.student_name,
       });
+      bucket.student_count = bucket.students.length;
     }
-
-    return classes.map((c: any) => ({
-      id: c.id,
-      name: c.name,
-      p_level: { id: c.p_level_id, name: c.p_level_name },
-      academic_year: { id: c.academic_year_id, name: c.academic_year_name },
-      teacher: c.teacher_id ? { id: c.teacher_id, name: c.teacher_name } : null,
-      distributed_at: c.distributed_at,
-      student_count: (byClass.get(c.id) ?? []).length,
-      students: byClass.get(c.id) ?? [],
-    }));
+    return Array.from(byClass.values());
   }
 }
