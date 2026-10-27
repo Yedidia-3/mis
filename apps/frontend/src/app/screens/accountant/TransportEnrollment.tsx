@@ -1,5 +1,5 @@
 import { ArrowLeft, Bus, Download, Loader2, MoreVertical, Plus, Search, Trash2 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { toast } from "sonner";
 import { api } from "../../../lib/api";
@@ -69,9 +69,6 @@ function classLabel(e: Enrollment): string {
   if (!cc) return "—";
   return `${cc.p_level?.name ?? ""}${cc.name}`;
 }
-function pLevelName(e: Enrollment): string {
-  return e.student?.current_class?.p_level?.name ?? "";
-}
 
 export function TransportEnrollment() {
   const navigate = useNavigate();
@@ -79,8 +76,7 @@ export function TransportEnrollment() {
   const [zones, setZones] = useState<Zone[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
-  const [pLevelFilter, setPLevelFilter] = useState<string>("all");
-  const [classFilter, setClassFilter] = useState<string>("all");
+  const [zoneFilter, setZoneFilter] = useState<string>("all");
   const [savingId, setSavingId] = useState<number | null>(null);
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [confirmRemove, setConfirmRemove] = useState(false);
@@ -108,22 +104,47 @@ export function TransportEnrollment() {
   useEffect(() => { load(); }, [load]);
   useAutoRefresh(load);
 
-  const pLevels = Array.from(new Set(enrollments.map(pLevelName).filter(Boolean))).sort();
-  const classesForFilter = Array.from(
-    new Set(
-      enrollments
-        .filter(e => pLevelFilter === "all" || pLevelName(e) === pLevelFilter)
-        .map(classLabel)
-        .filter(c => c !== "—")
-    )
-  ).sort();
+  const zoneName = (id: number | null) => zones.find(z => z.id === id)?.name ?? null;
+  const zoneKey = (e: Enrollment) => (e.zone_id != null && zoneName(e.zone_id) ? String(e.zone_id) : "none");
+  const zoneTitle = (e: Enrollment) => zoneName(e.zone_id) ?? "No zone";
+  const hasPayment = (e: Enrollment) => Object.keys(e.payments ?? {}).length > 0;
 
-  const filtered = enrollments.filter(e => {
-    const matchSearch = (e.student?.name ?? "").toLowerCase().includes(searchTerm.toLowerCase());
-    const matchPLevel = pLevelFilter === "all" || pLevelName(e) === pLevelFilter;
-    const matchClass = classFilter === "all" || classLabel(e) === classFilter;
-    return matchSearch && matchPLevel && matchClass;
-  });
+  const zoneCards = [
+    {
+      id: "all",
+      name: "All zones",
+      price: null as number | null,
+      students: enrollments.length,
+      paid: enrollments.filter(hasPayment).length,
+    },
+    ...[...zones].sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" })).map((z) => {
+      const rows = enrollments.filter((e) => e.zone_id === z.id);
+      return {
+        id: String(z.id),
+        name: z.name,
+        price: z.price,
+        students: rows.length,
+        paid: rows.filter(hasPayment).length,
+      };
+    }),
+    ...(enrollments.some((e) => e.zone_id == null || !zoneName(e.zone_id))
+      ? [{
+          id: "none",
+          name: "No zone",
+          price: null as number | null,
+          students: enrollments.filter((e) => e.zone_id == null || !zoneName(e.zone_id)).length,
+          paid: enrollments.filter((e) => (e.zone_id == null || !zoneName(e.zone_id)) && hasPayment(e)).length,
+        }]
+      : []),
+  ];
+
+  const filtered = enrollments
+    .filter((e) => {
+      const matchSearch = (e.student?.name ?? "").toLowerCase().includes(searchTerm.toLowerCase());
+      const matchZone = zoneFilter === "all" || zoneKey(e) === zoneFilter;
+      return matchSearch && matchZone;
+    })
+    .sort((a, b) => zoneTitle(a).localeCompare(zoneTitle(b)) || (a.student?.name ?? "").localeCompare(b.student?.name ?? ""));
 
   const today = new Date();
   const soonCutoff = new Date(); soonCutoff.setDate(today.getDate() + 5);
@@ -228,8 +249,6 @@ export function TransportEnrollment() {
     }
   };
 
-  const zoneName = (id: number | null) => zones.find(z => z.id === id)?.name ?? null;
-
   const handleExport = () => {
     const header = "Name,Class,Zone," + MONTHS.map(m => `M${m}`).join(",") + "\n";
     const rows = filtered.map(e => {
@@ -253,7 +272,7 @@ export function TransportEnrollment() {
           </Button>
           <h1 className="text-2xl font-semibold" style={{ color: "var(--dark-gray)" }}>Transport</h1>
           <p className="text-sm mt-1" style={{ color: "var(--mid-gray)" }}>
-            Use the Select column to choose students, then Remove selected. Assign a zone and tick monthly payments for each enrolled student.
+            Students are grouped by transport zone. Select a zone, tick payments, or remove the students you choose.
           </p>
         </div>
         <div className="flex gap-2">
@@ -267,6 +286,68 @@ export function TransportEnrollment() {
           </Button>
         </div>
       </div>
+
+      {!loading && (zones.length === 0 ? (
+        <Card style={{ borderColor: "var(--border)" }}>
+          <CardContent className="p-6 flex flex-col sm:flex-row sm:items-center gap-3">
+            <div className="flex-1">
+              <p className="font-semibold" style={{ color: "var(--dark-gray)" }}>No transport zones yet</p>
+              <p className="text-sm mt-1" style={{ color: "var(--mid-gray)" }}>
+                Add each route under Zones. Students then appear under the zone you assign, the way feeding lists each class.
+              </p>
+            </div>
+            <Button onClick={() => navigate("/accountant/zones")} style={{ backgroundColor: "var(--maroon)", color: "#FFFFFF" }}>
+              Manage zones
+            </Button>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {zoneCards.map((card) => {
+            const active = zoneFilter === card.id;
+            const priceLabel = card.price == null ? null : `${Number(card.price).toLocaleString()} RWF`;
+            return (
+              <Card key={card.id} style={{ borderColor: active ? "var(--maroon)" : "var(--border)", borderWidth: active ? 2 : 1 }}>
+                <CardContent className="p-6">
+                  <div className="flex items-center gap-4 mb-4">
+                    <div className="w-14 h-14 rounded-full flex items-center justify-center"
+                      style={{ backgroundColor: "color-mix(in srgb, var(--navy-blue) 13%, transparent)" }}>
+                      <Bus size={28} style={{ color: "var(--navy-blue)" }} />
+                    </div>
+                    <div>
+                      <h3 className="text-2xl font-bold" style={{ color: "var(--dark-gray)" }}>{card.name}</h3>
+                      <span className="inline-block px-2 py-1 rounded text-xs font-semibold text-white mt-1"
+                        style={{ backgroundColor: active ? "var(--maroon)" : "var(--success-green)" }}>
+                        {active ? "Viewing" : card.id === "none" ? "Unassigned" : "Zone"}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="space-y-3 mb-4">
+                    <div className="flex justify-between">
+                      <span className="text-sm" style={{ color: "var(--mid-gray)" }}>Students:</span>
+                      <span className="font-semibold" style={{ color: "var(--dark-gray)" }}>{card.students}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-sm" style={{ color: "var(--mid-gray)" }}>Paid:</span>
+                      <span className="font-semibold" style={{ color: "var(--dark-gray)" }}>{card.paid}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-sm" style={{ color: "var(--mid-gray)" }}>Price:</span>
+                      <span className="font-semibold" style={{ color: "var(--dark-gray)" }}>
+                        {priceLabel ?? (card.id === "none" ? "—" : "All")}
+                      </span>
+                    </div>
+                  </div>
+                  <Button onClick={() => setZoneFilter(card.id)} className="w-full"
+                    style={{ backgroundColor: "var(--maroon)", color: "#FFFFFF" }}>
+                    {active ? "Showing this zone" : "View students"}
+                  </Button>
+                </CardContent>
+              </Card>
+            );
+          })}
+        </div>
+      ))}
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
         {stats.map((stat) => (
@@ -289,18 +370,12 @@ export function TransportEnrollment() {
               <Input placeholder="Search student name..." value={searchTerm}
                 onChange={e => setSearchTerm(e.target.value)} className="pl-10 h-11" />
             </div>
-            <Select value={pLevelFilter} onValueChange={(v) => { setPLevelFilter(v); setClassFilter("all"); }}>
-              <SelectTrigger className="w-full md:w-44 h-11"><SelectValue /></SelectTrigger>
+            <Select value={zoneFilter} onValueChange={setZoneFilter}>
+              <SelectTrigger className="w-full md:w-52 h-11"><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All P-Levels</SelectItem>
-                {pLevels.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
-              </SelectContent>
-            </Select>
-            <Select value={classFilter} onValueChange={setClassFilter}>
-              <SelectTrigger className="w-full md:w-44 h-11"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Classes</SelectItem>
-                {classesForFilter.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                {zoneCards.map((card) => (
+                  <SelectItem key={card.id} value={card.id}>{card.name}</SelectItem>
+                ))}
               </SelectContent>
             </Select>
             <Button variant="outline" className="h-11" disabled={selectedInView.length === 0}
@@ -339,17 +414,28 @@ export function TransportEnrollment() {
                       </div>
                     </TableHead>
                     <TableHead className="text-white sticky left-16 z-10" style={{ backgroundColor: "var(--navy-blue)" }}>Name</TableHead>
-                    <TableHead className="text-white">Class</TableHead>
+                    <TableHead className="text-white">Zone</TableHead>
                     {MONTHS.map((m, i) => (
                       <TableHead key={m} className="text-white text-center">{MONTH_LABEL[i]} Month</TableHead>
                     ))}
-                    <TableHead className="text-white">Zone</TableHead>
                     <TableHead className="text-white text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filtered.map((e, index) => (
-                    <TableRow key={e.id} style={{ backgroundColor: index % 2 === 0 ? "#FFFFFF" : "var(--light-gray)" }}>
+                  {filtered.map((e, index) => {
+                    const showZoneHeader = zoneFilter === "all" && (index === 0 || zoneKey(filtered[index - 1]) !== zoneKey(e));
+                    const zoneCount = filtered.filter((row) => zoneKey(row) === zoneKey(e)).length;
+                    return (
+                    <Fragment key={e.id}>
+                    {showZoneHeader && (
+                      <TableRow>
+                        <TableCell colSpan={7} className="py-2" style={{ backgroundColor: "#EEF1F6" }}>
+                          <span className="text-xs font-bold uppercase tracking-wide" style={{ color: "var(--navy-blue)" }}>{zoneTitle(e)}</span>
+                          <span className="text-xs ml-2" style={{ color: "var(--mid-gray)" }}>{zoneCount} student{zoneCount === 1 ? "" : "s"}</span>
+                        </TableCell>
+                      </TableRow>
+                    )}
+                    <TableRow style={{ backgroundColor: index % 2 === 0 ? "#FFFFFF" : "var(--light-gray)" }}>
                       <TableCell className="sticky left-0 z-20" style={{ backgroundColor: index % 2 === 0 ? "#FFFFFF" : "var(--light-gray)" }}>
                         <Checkbox checked={selectedIds.includes(e.id)} onCheckedChange={() => toggleOne(e.id)} aria-label={`Select ${e.student?.name ?? "student"} for removal`} />
                       </TableCell>
@@ -359,8 +445,18 @@ export function TransportEnrollment() {
                         {savingId === e.id && <Loader2 className="inline ml-2 h-3 w-3 animate-spin" />}
                       </TableCell>
                       <TableCell>
-                        <span className="px-2 py-1 rounded text-xs font-semibold text-white"
-                          style={{ backgroundColor: "var(--navy-blue)" }}>{classLabel(e)}</span>
+                        <Select value={e.zone_id != null ? String(e.zone_id) : undefined} onValueChange={(v) => setZone(e, v)}>
+                          <SelectTrigger className="w-36 h-9">
+                            <SelectValue placeholder="Select zone" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {zones.length === 0 ? (
+                              <SelectItem value="__none" disabled>No zones</SelectItem>
+                            ) : zones.map(z => (
+                              <SelectItem key={z.id} value={String(z.id)}>{z.name}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                       </TableCell>
                       {MONTHS.map(m => {
                         const cell = e.payments?.[`${m}`];
@@ -382,20 +478,6 @@ export function TransportEnrollment() {
                           </TableCell>
                         );
                       })}
-                      <TableCell>
-                        <Select value={e.zone_id ? String(e.zone_id) : ""} onValueChange={(v) => setZone(e, v)}>
-                          <SelectTrigger className="w-32 h-9">
-                            <SelectValue placeholder="Select zone" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {zones.length === 0 ? (
-                              <SelectItem value="__none" disabled>No zones</SelectItem>
-                            ) : zones.map(z => (
-                              <SelectItem key={z.id} value={String(z.id)}>{z.name}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </TableCell>
                       <TableCell className="text-right">
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
@@ -409,7 +491,9 @@ export function TransportEnrollment() {
                         </DropdownMenu>
                       </TableCell>
                     </TableRow>
-                  ))}
+                    </Fragment>
+                    );
+                  })}
                 </TableBody>
               </Table>
             </div>
