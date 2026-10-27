@@ -1,4 +1,4 @@
-import { ArrowLeft, Bus, CheckCircle2, Loader2, Search, Users, Utensils } from "lucide-react";
+import { ArrowLeft, Bus, CheckCircle2, Loader2, Search, Trash2, Users, Utensils } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import { toast } from "sonner";
@@ -31,13 +31,14 @@ export function StudentListPerClass() {
 
   const [students, setStudents] = useState<RosterStudent[]>([]);
   const [zones, setZones] = useState<Zone[]>([]);
-  const [enrolled, setEnrolled] = useState<Record<number, boolean>>({});
+  const [enrollmentByStudent, setEnrollmentByStudent] = useState<Record<number, number>>({});
   const [loading, setLoading] = useState(true);
   const [enrollType, setEnrollType] = useState<EnrollType>("feeding");
   const [classFilter, setClassFilter] = useState("all");
   const [searchTerm, setSearchTerm] = useState("");
   const [selected, setSelected] = useState<number[]>([]);
   const [showEnroll, setShowEnroll] = useState(false);
+  const [showRemove, setShowRemove] = useState(false);
   const [zoneId, setZoneId] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -61,11 +62,13 @@ export function StudentListPerClass() {
     try {
       const res = await api.get<any>(`/api/v1/accountant/enrollments?type=${enrollType}`);
       const list = Array.isArray(res) ? res : res.data ?? [];
-      const map: Record<number, boolean> = {};
+      const map: Record<number, number> = {};
       for (const row of list) {
-        if (row?.student_id) map[row.student_id] = true;
+        const studentId = Number(row?.student_id ?? row?.student?.id);
+        const enrollmentId = Number(row?.id);
+        if (studentId && enrollmentId) map[studentId] = enrollmentId;
       }
-      setEnrolled(map);
+      setEnrollmentByStudent(map);
     } catch {
       /* enrollment status is optional on this screen */
     }
@@ -95,7 +98,11 @@ export function StudentListPerClass() {
   const visibleIds = visible.map((s) => s.id);
   const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selected.includes(id));
   const selectedVisible = selected.filter((id) => visibleIds.includes(id));
-  const importIds = selectedVisible.filter((id) => !enrolled[id]);
+  const importIds = selectedVisible.filter((id) => enrollmentByStudent[id] == null);
+  const removeEnrollmentIds = selectedVisible
+    .map((id) => enrollmentByStudent[id])
+    .filter((id): id is number => typeof id === "number");
+  const serviceLabel = enrollType === "feeding" ? "Feeding" : "Transport";
 
   const toggleAll = () => {
     setSelected((prev) => {
@@ -132,6 +139,28 @@ export function StudentListPerClass() {
     }
   };
 
+  const handleRemove = async () => {
+    if (!removeEnrollmentIds.length) {
+      toast.info(`None of the selected students are in ${serviceLabel.toLowerCase()}`);
+      return;
+    }
+    setSaving(true);
+    try {
+      const res = await api.post<{ removed: number }>('/api/v1/accountant/enrollments/bulk-remove', {
+        ids: removeEnrollmentIds,
+      });
+      const removed = res?.removed ?? removeEnrollmentIds.length;
+      toast.success(`${removed} student${removed === 1 ? '' : 's'} removed from ${enrollType}`);
+      setShowRemove(false);
+      setSelected([]);
+      await loadEnrollments();
+    } catch (err: any) {
+      toast.error(err.message ?? 'Failed to remove selected students');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const TypeIcon = enrollType === "feeding" ? Utensils : Bus;
 
   if (loading) {
@@ -157,18 +186,31 @@ export function StudentListPerClass() {
         <div>
           <h1 className="text-2xl font-semibold" style={{ color: "var(--dark-gray)" }}>{pLevelName} — Class List</h1>
           <p className="text-sm mt-1" style={{ color: "var(--mid-gray)" }}>
-            Select students, then import them into feeding or transport. This copy shows student ID, name, and class.
+            Select students, then import them into feeding or transport, or remove the ones already enrolled. This copy shows student ID, name, and class.
           </p>
         </div>
-        <Button
-          onClick={() => { setZoneId(zones[0] ? String(zones[0].id) : ""); setShowEnroll(true); }}
-          disabled={importIds.length === 0}
-          className="h-11"
-          style={{ backgroundColor: "var(--maroon)", color: "#FFFFFF" }}
-        >
-          Import selected to {enrollType === "feeding" ? "Feeding" : "Transport"}
-          {importIds.length > 0 ? ` (${importIds.length})` : ""}
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            onClick={() => { setZoneId(zones[0] ? String(zones[0].id) : ""); setShowEnroll(true); }}
+            disabled={importIds.length === 0}
+            className="h-11"
+            style={{ backgroundColor: "var(--maroon)", color: "#FFFFFF" }}
+          >
+            Import selected to {serviceLabel}
+            {importIds.length > 0 ? ` (${importIds.length})` : ""}
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => setShowRemove(true)}
+            disabled={removeEnrollmentIds.length === 0}
+            className="h-11"
+            style={{ borderColor: "var(--danger-red)", color: "var(--danger-red)" }}
+          >
+            <Trash2 size={16} className="mr-2" />
+            Remove selected from {serviceLabel}
+            {removeEnrollmentIds.length > 0 ? ` (${removeEnrollmentIds.length})` : ""}
+          </Button>
+        </div>
       </div>
 
       <Card style={{ borderColor: "var(--border)" }}>
@@ -221,7 +263,7 @@ export function StudentListPerClass() {
               <span className="w-28">Student ID</span>
               <span className="flex-1">Name</span>
               <span className="w-24">Class</span>
-              <span className="w-28 text-right">Enrollment</span>
+              <span className="w-32 text-right">{serviceLabel}</span>
             </div>
             {visible.length === 0 ? (
               <div className="text-center py-12">
@@ -231,7 +273,7 @@ export function StudentListPerClass() {
                 </p>
               </div>
             ) : visible.map((student, index) => {
-              const isEnrolled = !!enrolled[student.id];
+              const isEnrolled = enrollmentByStudent[student.id] != null;
               return (
                 <div key={student.id} className="flex items-center gap-3 px-4 py-3 border-b last:border-b-0"
                   style={{ borderColor: "var(--border)", backgroundColor: index % 2 === 0 ? "#FFFFFF" : "#F9F9FB" }}>
@@ -243,13 +285,13 @@ export function StudentListPerClass() {
                       {student.current_class}
                     </span>
                   </span>
-                  <span className="w-28 text-right">
+                  <span className="w-32 text-right">
                     {isEnrolled ? (
                       <span className="inline-flex items-center gap-1 text-xs font-semibold" style={{ color: "var(--success-green)" }}>
-                        <CheckCircle2 size={12} /> Enrolled
+                        <CheckCircle2 size={12} /> In {serviceLabel.toLowerCase()}
                       </span>
                     ) : (
-                      <span className="text-xs" style={{ color: "var(--mid-gray)" }}>Not enrolled</span>
+                      <span className="text-xs" style={{ color: "var(--mid-gray)" }}>Not in {serviceLabel.toLowerCase()}</span>
                     )}
                   </span>
                 </div>
@@ -262,7 +304,7 @@ export function StudentListPerClass() {
       <Dialog open={showEnroll} onOpenChange={setShowEnroll}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Import selected to {enrollType === "feeding" ? "Feeding" : "Transport"}</DialogTitle>
+            <DialogTitle>Import selected to {serviceLabel}</DialogTitle>
             <DialogDescription>
               {importIds.length} selected student{importIds.length === 1 ? "" : "s"} will be added.
               Students already enrolled are left as they are.
@@ -287,6 +329,26 @@ export function StudentListPerClass() {
               style={{ backgroundColor: "var(--maroon)", color: "#FFFFFF" }}>
               {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Import {importIds.length}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showRemove} onOpenChange={setShowRemove}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Remove selected from {serviceLabel}</DialogTitle>
+            <DialogDescription>
+              {removeEnrollmentIds.length} selected student{removeEnrollmentIds.length === 1 ? "" : "s"} will be removed from {serviceLabel.toLowerCase()}.
+              Students who are not in {serviceLabel.toLowerCase()} stay as they are. Payment history stays archived.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setShowRemove(false)} disabled={saving}>Cancel</Button>
+            <Button onClick={handleRemove} disabled={saving || removeEnrollmentIds.length === 0}
+              style={{ backgroundColor: "var(--danger-red)", color: "#FFFFFF" }}>
+              {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Remove {removeEnrollmentIds.length}
             </Button>
           </DialogFooter>
         </DialogContent>

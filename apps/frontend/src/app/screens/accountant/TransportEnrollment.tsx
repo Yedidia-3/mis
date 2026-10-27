@@ -253,7 +253,7 @@ export function TransportEnrollment() {
           </Button>
           <h1 className="text-2xl font-semibold" style={{ color: "var(--dark-gray)" }}>Transport</h1>
           <p className="text-sm mt-1" style={{ color: "var(--mid-gray)" }}>
-            Assign a zone and tick monthly payments for each enrolled student
+            Use the Select column to choose students, then Remove selected. Assign a zone and tick monthly payments for each enrolled student.
           </p>
         </div>
         <div className="flex gap-2">
@@ -332,10 +332,13 @@ export function TransportEnrollment() {
               <Table>
                 <TableHeader style={{ backgroundColor: "var(--navy-blue)" }}>
                   <TableRow>
-                    <TableHead className="text-white w-10" style={{ backgroundColor: "var(--navy-blue)" }}>
-                      <Checkbox checked={allVisibleSelected} onCheckedChange={toggleAll} className="bg-white" aria-label="Select all students in view" />
+                    <TableHead className="text-white w-16 sticky left-0 z-20" style={{ backgroundColor: "var(--navy-blue)" }}>
+                      <div className="flex flex-col items-center gap-1">
+                        <Checkbox checked={allVisibleSelected} onCheckedChange={toggleAll} className="bg-white" aria-label="Select all students in view" />
+                        <span className="text-[10px] font-semibold leading-none">Select</span>
+                      </div>
                     </TableHead>
-                    <TableHead className="text-white sticky left-0" style={{ backgroundColor: "var(--navy-blue)" }}>Name</TableHead>
+                    <TableHead className="text-white sticky left-16 z-10" style={{ backgroundColor: "var(--navy-blue)" }}>Name</TableHead>
                     <TableHead className="text-white">Class</TableHead>
                     {MONTHS.map((m, i) => (
                       <TableHead key={m} className="text-white text-center">{MONTH_LABEL[i]} Month</TableHead>
@@ -347,10 +350,10 @@ export function TransportEnrollment() {
                 <TableBody>
                   {filtered.map((e, index) => (
                     <TableRow key={e.id} style={{ backgroundColor: index % 2 === 0 ? "#FFFFFF" : "var(--light-gray)" }}>
-                      <TableCell>
-                        <Checkbox checked={selectedIds.includes(e.id)} onCheckedChange={() => toggleOne(e.id)} aria-label={`Select ${e.student?.name ?? "student"}`} />
+                      <TableCell className="sticky left-0 z-20" style={{ backgroundColor: index % 2 === 0 ? "#FFFFFF" : "var(--light-gray)" }}>
+                        <Checkbox checked={selectedIds.includes(e.id)} onCheckedChange={() => toggleOne(e.id)} aria-label={`Select ${e.student?.name ?? "student"} for removal`} />
                       </TableCell>
-                      <TableCell className="font-medium sticky left-0"
+                      <TableCell className="font-medium sticky left-16 z-10"
                         style={{ color: "var(--dark-gray)", backgroundColor: index % 2 === 0 ? "#FFFFFF" : "var(--light-gray)" }}>
                         {e.student?.name ?? '—'}
                         {savingId === e.id && <Loader2 className="inline ml-2 h-3 w-3 animate-spin" />}
