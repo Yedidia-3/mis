@@ -21,6 +21,20 @@ interface AuditEntry {
   ip_address: string;
 }
 
+function normalizeEntry(row: any): AuditEntry {
+  return {
+    timestamp: row?.timestamp ?? row?.created_at ?? '',
+    user: row?.user ?? row?.actor_name ?? 'System',
+    role: row?.role ?? row?.actor_role ?? 'system',
+    target_type: row?.target_type ?? null,
+    target_id: row?.target_id ?? null,
+    target_name: row?.target_name ?? null,
+    action: row?.action ?? '',
+    details: row?.details ?? '',
+    ip_address: row?.ip_address ?? '—',
+  };
+}
+
 const getRoleBadgeColor = (role: string) => {
   const lower = role?.toLowerCase() ?? '';
   if (lower.includes('super')) return "var(--maroon)";
@@ -42,7 +56,8 @@ export function AuditLog() {
     const load = async () => {
       try {
         const res = await api.get<any>('/api/v1/admin/audit-log');
-        setEntries(Array.isArray(res) ? res : res.data ?? []);
+        const list = Array.isArray(res) ? res : res?.data ?? [];
+        setEntries(Array.isArray(list) ? list.map(normalizeEntry).filter((e) => !Number.isNaN(new Date(e.timestamp).getTime())) : []);
       } catch {
         toast.error('Failed to load audit log');
       } finally {
@@ -62,8 +77,8 @@ export function AuditLog() {
     return matchSearch && matchUser && matchAction;
   });
 
-  const uniqueUsers = Array.from(new Set(entries.map(e => e.user)));
-  const uniqueActions = Array.from(new Set(entries.map(e => e.action)));
+  const uniqueUsers = Array.from(new Set(entries.map(e => e.user).filter(Boolean)));
+  const uniqueActions = Array.from(new Set(entries.map(e => e.action).filter(Boolean)));
 
   const handleExport = () => {
     const header = "Timestamp,User,Role,Target Type,Target ID,Target Name,Action,Details,IP\n";
@@ -150,7 +165,7 @@ export function AuditLog() {
                   {groupByWeek(filteredEntries, e => e.timestamp).map(group => (
                     <Fragment key={group.key}>
                       <TableRow>
-                        <TableCell colSpan={5} className="py-2" style={{ backgroundColor: "#EEF1F6" }}>
+                        <TableCell colSpan={6} className="py-2" style={{ backgroundColor: "#EEF1F6" }}>
                           <span className="text-xs font-bold uppercase tracking-wide" style={{ color: "var(--navy-blue)" }}>
                             {group.label}
                           </span>

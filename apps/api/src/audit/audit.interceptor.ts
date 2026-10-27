@@ -92,10 +92,14 @@ export class AuditInterceptor implements NestInterceptor {
         const actorName = user?.email || req.body?.email || 'System';
         const actorRole = user?.role || (path === '/auth/login' ? 'user' : 'system');
 
+        const target = describeTarget(path, ctx.params, ctx.body);
         this.audit.log({
           actor_id: user?.id,
           actor_name: actorName,
           actor_role: actorRole,
+          target_type: target.target_type,
+          target_id: target.target_id,
+          target_name: target.target_name,
           action,
           details,
           ip_address: ip,
@@ -107,4 +111,44 @@ export class AuditInterceptor implements NestInterceptor {
 
 function safe(fn: () => string): string {
   try { return fn(); } catch { return ''; }
+}
+
+function asId(value: unknown): number | undefined {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : undefined;
+}
+
+function describeTarget(path: string, params: any, body: any): { target_type?: string; target_id?: number; target_name?: string } {
+  const name = typeof body?.name === 'string' ? body.name : undefined;
+  if (path.startsWith('/admin/users')) {
+    return { target_type: 'user', target_id: asId(params?.id), target_name: name || body?.email };
+  }
+  if (path.includes('/academic-years')) {
+    return { target_type: 'academic year', target_id: asId(params?.id), target_name: name };
+  }
+  if (path.includes('/students')) {
+    return { target_type: 'student', target_id: asId(params?.id) || asId(params?.studentId), target_name: name };
+  }
+  if (path.includes('/p-levels')) {
+    return { target_type: 'p-level', target_id: asId(params?.id), target_name: name };
+  }
+  if (path.includes('/classes')) {
+    return { target_type: 'class', target_id: asId(params?.id), target_name: name };
+  }
+  if (path.includes('/shuffle/')) {
+    return { target_type: 'class list', target_id: asId(params?.sessionId) };
+  }
+  if (path.includes('/enrollments')) {
+    return { target_type: 'enrollment', target_id: asId(params?.id) || asId(params?.studentId) };
+  }
+  if (path.includes('/zones')) {
+    return { target_type: 'zone', target_id: asId(params?.id), target_name: name };
+  }
+  if (path.includes('/attendance')) {
+    return { target_type: 'attendance', target_id: asId(params?.id) };
+  }
+  if (path.startsWith('/auth')) {
+    return { target_type: 'account', target_name: body?.email };
+  }
+  return {};
 }
