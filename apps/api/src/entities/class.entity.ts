@@ -1,4 +1,4 @@
-import { Column, CreateDateColumn, Entity, Index, ManyToOne, OneToMany, PrimaryGeneratedColumn, UpdateDateColumn } from 'typeorm';
+import { Column, CreateDateColumn, Entity, Index, JoinColumn, ManyToOne, OneToMany, PrimaryGeneratedColumn, UpdateDateColumn } from 'typeorm';
 import { PLevel } from './p-level.entity';
 import { User } from './user.entity';
 import { Student } from './student.entity';
@@ -34,9 +34,11 @@ export class Class {
   updated_at: Date;
 
   @ManyToOne(() => PLevel, (pl) => pl.classes, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'p_level_id' })
   p_level: PLevel;
 
   @ManyToOne(() => User, (u) => u.classes, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'teacher_id' })
   teacher: User;
 
   @OneToMany(() => Student, (s) => s.current_class)

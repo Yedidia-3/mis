@@ -129,6 +129,7 @@ interface ImportResponse {
 
 export function StudentManagement() {
   const { user } = useAuth();
+  const canWrite = user?.role !== "accountant";
   const [searchParams, setSearchParams] = useSearchParams();
 
   // Data states
@@ -478,26 +479,30 @@ export function StudentManagement() {
             <Download size={15} /> Export
           </Button>
 
-          <Button
-            onClick={() => {
-              setImportFile(null);
-              setImportPreview(null);
-              setImportError(null);
-              setImportOpen(true);
-            }}
-            className="h-10 text-xs font-semibold gap-1.5 shadow-sm"
-            style={{ backgroundColor: "var(--maroon)", color: "#FFFFFF" }}
-          >
-            <Upload size={15} /> Import Excel / CSV
-          </Button>
+          {canWrite && (
+            <Button
+              onClick={() => {
+                setImportFile(null);
+                setImportPreview(null);
+                setImportError(null);
+                setImportOpen(true);
+              }}
+              className="h-10 text-xs font-semibold gap-1.5 shadow-sm"
+              style={{ backgroundColor: "var(--maroon)", color: "#FFFFFF" }}
+            >
+              <Upload size={15} /> Import Excel / CSV
+            </Button>
+          )}
 
-          <Button
-            onClick={handleOpenAdd}
-            className="h-10 text-xs font-semibold gap-1.5 shadow-sm"
-            style={{ backgroundColor: "var(--navy-blue, #001F5B)", color: "#FFFFFF" }}
-          >
-            <Plus size={15} /> Add Student
-          </Button>
+          {canWrite && (
+            <Button
+              onClick={handleOpenAdd}
+              className="h-10 text-xs font-semibold gap-1.5 shadow-sm"
+              style={{ backgroundColor: "var(--navy-blue, #001F5B)", color: "#FFFFFF" }}
+            >
+              <Plus size={15} /> Add Student
+            </Button>
+          )}
         </div>
       </div>
 
@@ -613,7 +618,7 @@ export function StudentManagement() {
             </div>
 
             <div className="flex items-center gap-2">
-              {selectedIds.length > 0 && (
+              {canWrite && selectedIds.length > 0 && (
                 <Button
                   size="sm"
                   variant="destructive"
@@ -653,13 +658,15 @@ export function StudentManagement() {
               <p className="text-xs text-muted-foreground max-w-sm mx-auto mb-4">
                 No student records match the selected filters. You can upload an Excel/CSV sheet or add students manually.
               </p>
-              <Button
-                size="sm"
-                onClick={() => setImportOpen(true)}
-                style={{ backgroundColor: "var(--maroon)", color: "#FFFFFF" }}
-              >
-                <Upload size={14} className="mr-1.5" /> Import Excel / CSV
-              </Button>
+              {canWrite && (
+                <Button
+                  size="sm"
+                  onClick={() => setImportOpen(true)}
+                  style={{ backgroundColor: "var(--maroon)", color: "#FFFFFF" }}
+                >
+                  <Upload size={14} className="mr-1.5" /> Import Excel / CSV
+                </Button>
+              )}
             </div>
           ) : (
             <Table>
@@ -814,27 +821,29 @@ export function StudentManagement() {
                         </Badge>
                       </TableCell>
                       <TableCell className="text-right">
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon" className="h-8 w-8">
-                              <MoreVertical size={15} />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem onClick={() => handleOpenEdit(s)}>
-                              <Pencil size={14} className="mr-2 text-muted-foreground" /> Edit Student
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              onClick={() => {
-                                setStudentToDelete(s);
-                                setDeleteConfirmOpen(true);
-                              }}
-                              className="text-red-600 focus:text-red-600"
-                            >
-                              <Trash2 size={14} className="mr-2" /> Delete Student
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
+                        {canWrite && (
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button variant="ghost" size="icon" className="h-8 w-8">
+                                <MoreVertical size={15} />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem onClick={() => handleOpenEdit(s)}>
+                                <Pencil size={14} className="mr-2 text-muted-foreground" /> Edit Student
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={() => {
+                                  setStudentToDelete(s);
+                                  setDeleteConfirmOpen(true);
+                                }}
+                                className="text-red-600 focus:text-red-600"
+                              >
+                                <Trash2 size={14} className="mr-2" /> Delete Student
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        )}
                       </TableCell>
                     </TableRow>
                   );

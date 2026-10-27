@@ -89,7 +89,7 @@ export class AcademicsController {
 
   // Students
   @Get('students')
-  @Roles('dean', 'principal', 'teacher', 'super_admin')
+  @Roles('dean', 'principal', 'teacher', 'super_admin', 'accountant')
   listStudents(
     @Query('academic_year_id') yearId?: string,
     @Query('p_level_id') pLevelId?: string,
@@ -148,7 +148,7 @@ export class AcademicsController {
   }
 
   @Get('students/:id')
-  @Roles('dean', 'principal', 'teacher', 'super_admin')
+  @Roles('dean', 'principal', 'teacher', 'super_admin', 'accountant')
   getStudent(@Param('id') id: string) {
     return this.academicsService.getStudent(+id);
   }

@@ -70,6 +70,7 @@ const navItems = {
   ],
   accountant: [
     { icon: LayoutDashboard, label: "Dashboard",   path: "/accountant/dashboard" },
+    { icon: Users,           label: "Students",    path: "/students" },
     { icon: BookOpen,        label: "Class Lists", path: "/accountant/class-lists" },
     { icon: DollarSign,      label: "Enrollments", path: "/accountant/enrollment" },
     { icon: Settings,        label: "Zones",       path: "/accountant/zones" },
@@ -91,7 +92,7 @@ function isPathAllowedForRole(pathname: string, role: string): boolean {
   }
 
   if (pathname === "/students" || pathname.startsWith("/students/")) {
-    return role !== "accountant";
+    return role === "super_admin" || role === "dean" || role === "principal" || role === "teacher" || role === "accountant";
   }
 
   // Role prefix checks

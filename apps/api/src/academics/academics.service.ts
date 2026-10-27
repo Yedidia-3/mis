@@ -191,76 +191,95 @@ export class AcademicsService {
     page?: number;
     limit?: number;
   }) {
-    const qb = this.studentRepo.createQueryBuilder('s')
-      .leftJoinAndSelect('s.current_class', 'c')
-      .leftJoinAndSelect('c.p_level', 'pl')
-      .leftJoinAndSelect('s.academic_year', 'ay')
-      .leftJoinAndSelect('s.imported_by_user', 'ibu')
-      .leftJoinAndSelect('s.approved_by_user', 'abu');
+    // Join the real snake_case foreign keys. The relation metadata also has
+    // leftover camelCase columns (currentClassId, pLevelId) that are empty, so
+    // a TypeORM join makes every P-level filter return no students.
+    const where: string[] = [];
+    const args: any[] = [];
+    const bind = (value: any) => {
+      args.push(value);
+      return `$${args.length}`;
+    };
 
     if (params.academicYearId) {
-      qb.andWhere('s.academic_year_id = :yearId', { yearId: params.academicYearId });
+      const year = bind(params.academicYearId);
+      where.push(`(s.academic_year_id = ${year} OR pl.academic_year_id = ${year})`);
     } else {
-      qb.andWhere(
-        's.academic_year_id = COALESCE((SELECT id FROM academic_years WHERE status = \'active\' ORDER BY created_at DESC LIMIT 1), s.academic_year_id)'
+      where.push(
+        `(s.academic_year_id = COALESCE((SELECT id FROM academic_years WHERE status = 'active' ORDER BY created_at DESC LIMIT 1), s.academic_year_id) OR pl.academic_year_id = COALESCE((SELECT id FROM academic_years WHERE status = 'active' ORDER BY created_at DESC LIMIT 1), pl.academic_year_id))`,
       );
     }
 
-    if (params.pLevelId) {
-      qb.andWhere('c.p_level_id = :plId', { plId: params.pLevelId });
-    }
+    if (params.pLevelId) where.push(`c.p_level_id = ${bind(params.pLevelId)}`);
+    if (params.classId) where.push(`s.current_class_id = ${bind(params.classId)}`);
 
-    if (params.classId) {
-      qb.andWhere('s.current_class_id = :classId', { classId: params.classId });
-    }
-
-    if (params.status) {
-      qb.andWhere('s.status = :status', { status: params.status });
+    const statuses = ['active', 'repeating', 'promoted', 'transferred'];
+    if (params.status && statuses.includes(params.status)) {
+      where.push(`s.status::text = ${bind(params.status)}`);
     }
 
     if (params.search && params.search.trim()) {
-      const term = `%${params.search.trim().toLowerCase()}%`;
-      qb.andWhere(
-        '(LOWER(s.name) LIKE :term OR LOWER(COALESCE(s.student_id_number, \'\')) LIKE :term OR LOWER(COALESCE(c.name, \'\')) LIKE :term)',
-        { term }
+      const term = bind(`%${params.search.trim().toLowerCase()}%`);
+      where.push(
+        `(LOWER(s.name) LIKE ${term} OR LOWER(COALESCE(s.student_id_number, '')) LIKE ${term} OR LOWER(COALESCE(c.name, '')) LIKE ${term} OR LOWER(COALESCE(pl.name, '')) LIKE ${term})`,
       );
     }
 
-    qb.orderBy('pl.name', 'ASC')
-      .addOrderBy('c.name', 'ASC')
-      .addOrderBy('s.rank', 'ASC', 'NULLS LAST')
-      .addOrderBy('s.name', 'ASC');
-
+    const from = `
+      FROM students s
+      LEFT JOIN classes c ON c.id = s.current_class_id
+      LEFT JOIN p_levels pl ON pl.id = c.p_level_id
+      LEFT JOIN academic_years ay ON ay.id = s.academic_year_id
+      LEFT JOIN users ibu ON ibu.id = s.imported_by_user_id
+    `;
+    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
     const page = params.page ? Math.max(1, Number(params.page)) : 1;
     const limit = params.limit ? Math.min(2000, Math.max(1, Number(params.limit))) : 500;
-    qb.skip((page - 1) * limit).take(limit);
+    const offset = (page - 1) * limit;
 
-    const [students, total] = await qb.getManyAndCount();
+    const countRows = await this.studentRepo.query(
+      `SELECT COUNT(*)::int AS total ${from} ${whereSql}`,
+      args,
+    );
+    const total = Number(countRows[0]?.total ?? 0);
+    const rows = await this.studentRepo.query(
+      `SELECT s.id, s.student_id_number, s.name, s.academic_year_id, ay.name AS academic_year_name,
+              s.current_class_id, c.name AS class_name, c.p_level_id, pl.name AS p_level_name,
+              s.former_class, s.rank, s.marks_percentage, s.status::text AS status, s.is_imported,
+              s.approval_status, s.imported_at, s.imported_by_user_id,
+              ibu.name AS imported_by_name, ibu.email AS imported_by_email, ibu.role::text AS imported_by_role,
+              s.approved_by_user_id, s.approved_at, s.created_at, s.updated_at
+       ${from}
+       ${whereSql}
+       ORDER BY pl.name ASC NULLS LAST, c.name ASC NULLS LAST, s.rank ASC NULLS LAST, s.name ASC
+       LIMIT ${bind(limit)} OFFSET ${bind(offset)}`,
+      args,
+    );
 
     return {
-      data: students.map((s) => ({
+      data: rows.map((s: any) => ({
         id: s.id,
         student_id_number: s.student_id_number,
         name: s.name,
         academic_year_id: s.academic_year_id,
-        academic_year_name: s.academic_year?.name,
+        academic_year_name: s.academic_year_name,
         current_class_id: s.current_class_id,
-        class_name: s.current_class?.name,
-        p_level_id: s.current_class?.p_level_id,
-        p_level_name: s.current_class?.p_level?.name,
+        class_name: s.class_name,
+        p_level_id: s.p_level_id,
+        p_level_name: s.p_level_name,
         former_class: s.former_class,
-        rank: s.rank,
-        marks_percentage: s.marks_percentage,
+        rank: s.rank != null ? Number(s.rank) : null,
+        marks_percentage: s.marks_percentage != null ? Number(s.marks_percentage) : null,
         status: s.status,
         is_imported: s.is_imported,
         approval_status: s.approval_status,
         imported_at: s.imported_at,
         imported_by_user_id: s.imported_by_user_id,
-        imported_by: s.imported_by_user ? {
-          id: s.imported_by_user.id,
-          name: s.imported_by_user.name,
-          email: s.imported_by_user.email,
-          role: s.imported_by_user.role,
+        imported_by: s.imported_by_user_id ? {
+          id: s.imported_by_user_id,
+          name: s.imported_by_name,
+          email: s.imported_by_email,
+          role: s.imported_by_role,
         } : null,
         approved_by_user_id: s.approved_by_user_id,
         approved_at: s.approved_at,

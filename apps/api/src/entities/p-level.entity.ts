@@ -1,4 +1,4 @@
-import { Column, CreateDateColumn, Entity, Index, ManyToOne, OneToMany, PrimaryGeneratedColumn, UpdateDateColumn } from 'typeorm';
+import { Column, CreateDateColumn, Entity, Index, JoinColumn, ManyToOne, OneToMany, PrimaryGeneratedColumn, UpdateDateColumn } from 'typeorm';
 import { AcademicYear } from './academic-year.entity';
 import { Class } from './class.entity';
 import { ShuffleSession } from './shuffle-session.entity';
@@ -51,6 +51,7 @@ export class PLevel {
   updated_at: Date;
 
   @ManyToOne(() => AcademicYear, (ay) => ay.p_levels, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'academic_year_id' })
   academic_year: AcademicYear;
 
   @OneToMany(() => Class, (c) => c.p_level)

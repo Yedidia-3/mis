@@ -70,9 +70,11 @@ export class Student {
   updated_at: Date;
 
   @ManyToOne(() => AcademicYear, (ay) => ay.students, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'academic_year_id' })
   academic_year: AcademicYear;
 
   @ManyToOne(() => Class, (c) => c.students, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'current_class_id' })
   current_class: Class;
 
   @OneToMany(() => ShuffleResult, (sr) => sr.student)
