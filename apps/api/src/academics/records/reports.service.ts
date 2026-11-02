@@ -222,9 +222,11 @@ export class ReportsService {
       if (!issues.some((i) => i.level === 'blocking')) {
         const { assessments, marks, drafts } = await this.termMarks(classId, term.id);
         this.draftWarnings(drafts, term.name, issues);
-        this.coverageWarnings(kind, subjects, assessments, term.name, issues);
+        // The school's mid-term bulletin has the same TJ / EXAM / TOT columns as
+        // the end of term one, filled with whatever has been submitted so far.
+        this.coverageWarnings('end_of_term', subjects, assessments, term.name, issues);
         for (const st of roster) {
-          const results = computeTermSubjects(kind, subjects, assessments, marks, st.id);
+          const results = computeTermSubjects('end_of_term', subjects, assessments, marks, st.id);
           lines.set(st.id, subjects.map((s, i) => ({
             subject_id: s.id, name: s.name, code: s.code, group: s.group, max: s.max,
             tj: results[i].tj,
@@ -266,7 +268,7 @@ export class ReportsService {
         kind,
         kind_label: KIND_LABELS[kind],
         academic_year: cls.academic_year_name,
-        term: term ? { id: term.id, name: term.name, status: term.status } : null,
+        term: term ? { id: term.id, name: term.name, sequence: term.sequence, status: term.status } : null,
         terms: terms.map((t) => ({ id: t.id, name: t.name, sequence: t.sequence, status: t.status })),
         class: { id: cls.id, label: cls.label, p_level: cls.p_level_name, p_level_id: cls.p_level_id, band: cls.band },
         class_teacher: cls.class_teacher_name ?? null,
