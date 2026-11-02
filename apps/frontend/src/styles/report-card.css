@@ -1,0 +1,46 @@
+.report-card {
+  font-family: "Times New Roman", Georgia, serif;
+  color: #111;
+  background: #fff;
+  width: 100%;
+  max-width: 190mm;
+  margin: 0 auto;
+  font-size: 11.5px;
+  line-height: 1.3;
+}
+.rc-head { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; }
+.rc-authority { font-size: 10.5px; font-weight: 600; letter-spacing: 0.01em; }
+.rc-school { font-size: 13px; font-weight: 800; margin-top: 2px; }
+.rc-titleblock { text-align: right; }
+.rc-title { font-size: 16px; font-weight: 800; letter-spacing: 0.04em; border: 2px solid #111; padding: 4px 10px; display: inline-block; }
+.rc-period { margin-top: 6px; font-weight: 600; }
+.rc-pupil { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 16px; margin: 12px 0 8px; font-size: 12px; }
+.rc-pupil span { font-weight: 600; }
+.rc-table { width: 100%; border-collapse: collapse; }
+.rc-table th, .rc-table td { border: 1px solid #222; padding: 3px 5px; }
+.rc-table th { font-size: 10.5px; font-weight: 700; background: #f1f1f1; text-align: center; }
+.rc-subject { text-align: left; }
+.rc-num { text-align: center; font-variant-numeric: tabular-nums; min-width: 34px; }
+.rc-strong { font-weight: 700; }
+.rc-group td { font-weight: 700; background: #fafafa; }
+.rc-sub td.rc-subject { padding-left: 16px; font-size: 10.5px; }
+.rc-total td { font-weight: 700; }
+.rc-flag { background: #fde8e8; outline: 2px solid #c0392b; outline-offset: -2px; cursor: help; }
+.rc-sign { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 18px; }
+.rc-sign-label { font-weight: 700; font-size: 10.5px; }
+.rc-line { border-bottom: 1px dotted #444; height: 34px; }
+.rc-small { font-size: 10px; margin-top: 3px; }
+
+.print-root { display: none; }
+
+@media print {
+  @page { size: A4 portrait; margin: 10mm; }
+  html, body { height: auto !important; background: #fff !important; }
+  body > #root { display: none !important; }
+  body > [data-radix-portal], body > [role="dialog"], [data-sonner-toaster] { display: none !important; }
+  .print-root { display: block !important; }
+  .print-page { break-after: page; page-break-after: always; }
+  .print-page:last-child { break-after: auto; page-break-after: auto; }
+  .rc-flag { background: none !important; outline: none !important; }
+  .rc-table th { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}

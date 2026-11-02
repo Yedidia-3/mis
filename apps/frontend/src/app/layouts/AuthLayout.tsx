@@ -2,7 +2,9 @@ import {
     Bell,
     BookOpen,
     ClipboardCheck,
+    ClipboardPen,
     DollarSign,
+    FileSpreadsheet,
     FileText,
     GraduationCap,
     LayoutDashboard,
@@ -55,6 +57,8 @@ const navItems = {
     { icon: FileText,        label: "Import Data",  path: "/dean/import" },
     { icon: Users,           label: "Distribution", path: "/dean/distribution" },
     { icon: BookOpen,        label: "Courses",      path: "/dean/courses" },
+    { icon: ClipboardCheck,  label: "Academic Records",  path: "/dean/academic-records" },
+    { icon: FileSpreadsheet, label: "Report Generation", path: "/dean/reports" },
   ],
   principal: [
     { icon: LayoutDashboard, label: "Dashboard",         path: "/principal/dashboard" },
@@ -65,6 +69,7 @@ const navItems = {
   teacher: [
     { icon: LayoutDashboard, label: "Dashboard",          path: "/teacher/dashboard" },
     { icon: BookOpen,        label: "My Classes",         path: "/teacher/my-classes" },
+    { icon: ClipboardPen,    label: "Marks",              path: "/teacher/marks" },
     { icon: Users,           label: "Students",           path: "/students" },
     { icon: ClipboardCheck,  label: "Attendance History", path: "/teacher/attendance-history" },
   ],

@@ -268,7 +268,7 @@ export class ReportsService {
         academic_year: cls.academic_year_name,
         term: term ? { id: term.id, name: term.name, status: term.status } : null,
         terms: terms.map((t) => ({ id: t.id, name: t.name, sequence: t.sequence, status: t.status })),
-        class: { id: cls.id, label: cls.label, p_level: cls.p_level_name, band: cls.band },
+        class: { id: cls.id, label: cls.label, p_level: cls.p_level_name, p_level_id: cls.p_level_id, band: cls.band },
         class_teacher: cls.class_teacher_name ?? null,
       },
       subjects,
