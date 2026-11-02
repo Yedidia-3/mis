@@ -7,6 +7,8 @@ import { REPORT_KINDS, ReportKind } from '../../../entities/report-card.entity';
 import { NormaliseText, NUMBER_OPTS, RULES } from '../../assessments/dto/input-rules';
 import { SchoolBand } from '../school-band';
 
+const TERM_MESSAGE = { message: 'Choose a term for mid-term and end of term reports' };
+
 const BANDS: SchoolBand[] = ['nursery', 'lower_primary', 'upper_primary'];
 
 export class BandQueryDto {
@@ -22,9 +24,9 @@ export class ReportQueryDto {
 
   @ValidateIf((o) => o.kind !== 'end_of_year')
   @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  @Max(RULES.ID_MAX)
+  @IsInt(TERM_MESSAGE)
+  @Min(1, TERM_MESSAGE)
+  @Max(RULES.ID_MAX, TERM_MESSAGE)
   term_id?: number;
 }
 
@@ -38,9 +40,9 @@ export class GenerateReportsDto {
   kind: ReportKind;
 
   @ValidateIf((o) => o.kind !== 'end_of_year')
-  @IsInt()
-  @Min(1)
-  @Max(RULES.ID_MAX)
+  @IsInt(TERM_MESSAGE)
+  @Min(1, TERM_MESSAGE)
+  @Max(RULES.ID_MAX, TERM_MESSAGE)
   term_id?: number;
 
   // Omitted means the whole class.

@@ -13,7 +13,7 @@ export const RULES = {
   // and the punctuation a title realistically needs. Must start with a letter
   // or digit. Angle brackets, quotes, backslashes and control characters are
   // refused so nothing typed here can break the printed report.
-  TITLE_PATTERN: /^[\p{L}\p{N}][\p{L}\p{N} .,'’()\-/&:#]*$/u,
+  TITLE_PATTERN: /^[\p{L}\p{N}][\p{L}\p{N} .,'’()\-–/&:#]*$/u,
   GROUP_MAX: 40,
   GROUP_PATTERN: /^\p{L}[\p{L} .'’\-&]*$/u,
   DATE_PATTERN: /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/,
