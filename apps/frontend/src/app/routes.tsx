@@ -43,6 +43,7 @@ import { SectionTeachers } from "./screens/dean/records/SectionTeachers";
 import { TeacherAssessments } from "./screens/dean/records/TeacherAssessments";
 import { ClassReports } from "./screens/dean/reports/ClassReports";
 import { ReportsHome } from "./screens/dean/reports/ReportsHome";
+import { TermControl } from "./screens/dean/terms/TermControl";
 import { MarksList } from "./screens/teacher/marks/MarksList";
 import { MarksSheet } from "./screens/teacher/marks/MarksSheet";
 
@@ -172,6 +173,10 @@ export const router = createBrowserRouter([
       {
         path: "dean/courses",
         Component: CourseCatalogue,
+      },
+      {
+        path: "dean/terms",
+        Component: TermControl,
       },
       {
         path: "dean/academic-records",

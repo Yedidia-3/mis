@@ -4,7 +4,6 @@ import { useNavigate } from "react-router";
 import { api } from "../../../../lib/api";
 import { EmptyState, ErrorState, Loading, PageHeader } from "../../../components/academic";
 import { Button } from "../../../components/ui/button";
-import { TermsDialog } from "./TermsDialog";
 
 interface Section {
   key: "nursery" | "lower_primary" | "upper_primary"; label: string; class_count: number;
@@ -20,7 +19,6 @@ export function AcademicRecords() {
   const navigate = useNavigate();
   const [data, setData] = useState<Overview | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [terms, setTerms] = useState(false);
 
   const load = useCallback(async () => {
     setError(null);
@@ -35,7 +33,7 @@ export function AcademicRecords() {
         title="Academic Records"
         subtitle={data?.academic_year ? `Marks teachers have submitted in ${data.academic_year.name}, by section.` : "Marks teachers have submitted, by section."}
         actions={data?.academic_year && (
-          <Button variant="outline" onClick={() => setTerms(true)}>
+          <Button variant="outline" onClick={() => navigate("/dean/terms")}>
             <CalendarRange size={16} className="mr-1.5" /> Terms
           </Button>
         )}
@@ -75,9 +73,6 @@ export function AcademicRecords() {
         </div>
       )}
 
-      {data?.academic_year && (
-        <TermsDialog open={terms} onOpenChange={setTerms} yearId={data.academic_year.id} yearName={data.academic_year.name} />
-      )}
     </div>
   );
 }

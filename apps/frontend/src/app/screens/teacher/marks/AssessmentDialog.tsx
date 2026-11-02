@@ -17,6 +17,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 
 export interface RecordingOptions {
   academic_year: { id: number; name: string } | null;
+  current_term_id: number | null;
   classes: {
     id: number; label: string; p_level_name: string; role: "class_teacher" | "teacher";
     student_count: number; subjects: { id: number; name: string; code: string }[];
@@ -41,7 +42,6 @@ export function AssessmentDialog(props: Props) {
 
   const [classId, setClassId] = useState("");
   const [subjectId, setSubjectId] = useState("");
-  const [termId, setTermId] = useState("");
   const [category, setCategory] = useState("");
   const [title, setTitle] = useState("");
   const [date, setDate] = useState(todayIso());
@@ -58,11 +58,8 @@ export function AssessmentDialog(props: Props) {
       setMaxScore(String(existing.max_score));
       setCategory(existing.category ?? "");
     } else {
-      const openTerms = options?.terms.filter((t) => t.status !== "closed") ?? [];
-      const current = openTerms.find((t) => t.status === "active") ?? openTerms[0];
       setClassId(options?.classes.length === 1 ? String(options.classes[0].id) : "");
       setSubjectId("");
-      setTermId(current ? String(current.id) : "");
       setCategory("");
       setTitle("");
       setMaxScore("");
@@ -71,24 +68,24 @@ export function AssessmentDialog(props: Props) {
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const cls = options?.classes.find((c) => String(c.id) === classId);
-  const openTerms = options?.terms.filter((t) => t.status !== "closed") ?? [];
+  const currentTerm = options?.terms.find((t) => t.id === options.current_term_id && t.status === "active") ?? null;
   const term = existing
     ? { name: existing.term_name, start_date: existing.term_start, end_date: existing.term_end }
-    : openTerms.find((t) => String(t.id) === termId) ?? null;
+    : currentTerm;
 
   const errors = useMemo(() => {
     const e: Record<string, string | null> = {};
     if (mode === "create") {
       e.class = classId ? null : "Choose a class";
       e.subject = subjectId ? null : "Choose a subject";
-      e.term = termId ? null : "Choose a term";
+      e.term = currentTerm ? null : "No term is open";
     }
     e.category = CATEGORIES.some((c) => c.value === category) ? null : "Choose quiz, homework or exam";
     e.title = validateTitle(title);
     e.date = validateAssessmentDate(date, term);
     e.max = parseBoundedNumber(maxScore, RULES.MAX_SCORE_MIN, RULES.MAX_SCORE_MAX, "Maximum mark").error;
     return e;
-  }, [mode, classId, subjectId, termId, category, title, date, maxScore, term]);
+  }, [mode, classId, subjectId, currentTerm, category, title, date, maxScore, term]);
   const valid = Object.values(errors).every((x) => !x);
   const show = (k: string) => (touched[k] ? errors[k] : null);
 
@@ -109,7 +106,7 @@ export function AssessmentDialog(props: Props) {
         props.onSaved(existing.id);
       } else {
         const created = await api.post<{ id: number }>("/api/v1/academics/assessments", {
-          ...body, class_id: Number(classId), subject_id: Number(subjectId), term_id: Number(termId),
+          ...body, class_id: Number(classId), subject_id: Number(subjectId), term_id: currentTerm?.id,
         });
         toast.success("Assessment created. Enter the marks next.");
         props.onSaved(created.id);
@@ -123,7 +120,7 @@ export function AssessmentDialog(props: Props) {
   };
 
   const noClasses = mode === "create" && (options?.classes.length ?? 0) === 0;
-  const noTerms = mode === "create" && openTerms.length === 0;
+  const noTerms = mode === "create" && !currentTerm;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -143,7 +140,7 @@ export function AssessmentDialog(props: Props) {
           </p>
         ) : noTerms ? (
           <p className="text-sm py-4" style={{ color: "var(--mid-gray)" }}>
-            There is no open term to record in. Ask the dean to set up the term.
+            No term is open right now, so marks cannot be recorded. The dean opens each term when it starts.
           </p>
         ) : (
           <form className="grid gap-4 py-1" noValidate onSubmit={(e) => { e.preventDefault(); submit(); }}>
@@ -175,12 +172,11 @@ export function AssessmentDialog(props: Props) {
                 </div>
                 <div>
                   <Label>Term</Label>
-                  <Select value={termId} onValueChange={(v) => { setTermId(v); setTouched((t) => ({ ...t, term: true })); }}>
-                    <SelectTrigger className="mt-1.5"><SelectValue placeholder="Choose term" /></SelectTrigger>
-                    <SelectContent>
-                      {openTerms.map((t) => <SelectItem key={t.id} value={String(t.id)}>{t.name}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
+                  <div className="mt-1.5 h-9 px-3 rounded-md border flex items-center gap-2 text-sm"
+                    style={{ borderColor: "var(--border)", backgroundColor: "var(--light-gray)" }} aria-label="Term">
+                    <span className="font-medium" style={{ color: "var(--dark-gray)" }}>{currentTerm?.name}</span>
+                    <span className="text-xs" style={{ color: "var(--success-green)" }}>Current term</span>
+                  </div>
                   <FieldError message={show("term")} />
                 </div>
                 <CategoryField value={category} onChange={(v) => { setCategory(v); setTouched((t) => ({ ...t, category: true })); }} error={show("category")} />

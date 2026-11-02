@@ -76,7 +76,7 @@ export function ReportsHome() {
             <SelectTrigger className="w-full sm:w-48 bg-white"><SelectValue placeholder="Choose term" /></SelectTrigger>
             <SelectContent>
               {data.terms.map((t) => (
-                <SelectItem key={t.id} value={String(t.id)}>{t.name}{t.status === "closed" ? " (closed)" : t.status === "active" ? " (open)" : ""}</SelectItem>
+                <SelectItem key={t.id} value={String(t.id)}>{t.name}{t.status === "closed" ? " (closed)" : t.status === "active" ? " (current)" : ""}</SelectItem>
               ))}
             </SelectContent>
           </Select>

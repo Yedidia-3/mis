@@ -1,6 +1,7 @@
 import {
     Bell,
     BookOpen,
+    CalendarRange,
     ClipboardCheck,
     ClipboardPen,
     DollarSign,
@@ -57,6 +58,7 @@ const navItems = {
     { icon: FileText,        label: "Import Data",  path: "/dean/import" },
     { icon: Users,           label: "Distribution", path: "/dean/distribution" },
     { icon: BookOpen,        label: "Courses",      path: "/dean/courses" },
+    { icon: CalendarRange,   label: "Terms",             path: "/dean/terms" },
     { icon: ClipboardCheck,  label: "Academic Records",  path: "/dean/academic-records" },
     { icon: FileSpreadsheet, label: "Report Generation", path: "/dean/reports" },
   ],

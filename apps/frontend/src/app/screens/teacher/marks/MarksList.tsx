@@ -12,7 +12,7 @@ import { Tabs, TabsList, TabsTrigger } from "../../../components/ui/tabs";
 import { AssessmentDialog, RecordingOptions } from "./AssessmentDialog";
 
 interface MyAssessment {
-  id: number; title: string; date: string; max_score: number; status: "draft" | "submitted";
+  id: number; title: string; date: string; max_score: number; status: "draft" | "submitted"; term_id: number;
   class_label: string; subject_name: string; category: string | null; term_name: string;
   term_status: string; recorded: number; roster_size: number; submitted_at: string | null;
 }
@@ -25,6 +25,7 @@ export function MarksList() {
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState("all");
   const [category, setCategory] = useState("all");
+  const [termFilter, setTermFilter] = useState<string | null>(null);
   const [dialog, setDialog] = useState(false);
 
   const load = useCallback(async () => {
@@ -36,6 +37,7 @@ export function MarksList() {
       ]);
       setItems(mine);
       setOptions(opts);
+      setTermFilter((f) => f ?? (opts.current_term_id ? String(opts.current_term_id) : "all"));
     } catch (e: any) {
       setError(e?.message ?? "Could not load your assessments");
     } finally {
@@ -44,15 +46,19 @@ export function MarksList() {
   }, []);
   useEffect(() => { load(); }, [load]);
 
-  const shown = useMemo(() => items.filter((a) =>
-    (tab === "all" || a.status === tab) && (category === "all" || a.category === category)), [items, tab, category]);
-  const drafts = items.filter((a) => a.status === "draft").length;
+  const inTerm = useMemo(() => items.filter((a) => !termFilter || termFilter === "all" || String(a.term_id) === termFilter), [items, termFilter]);
+  const shown = useMemo(() => inTerm.filter((a) =>
+    (tab === "all" || a.status === tab) && (category === "all" || a.category === category)), [inTerm, tab, category]);
+  const drafts = inTerm.filter((a) => a.status === "draft").length;
+  const currentTerm = options?.terms.find((t) => t.id === options.current_term_id) ?? null;
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Marks"
-        subtitle="Record quiz, homework and exam marks, then submit them to the dean."
+        subtitle={currentTerm
+          ? `Current term: ${currentTerm.name}. Record quiz, homework and exam marks, then submit them to the dean.`
+          : "No term is open, so new marks cannot be recorded. The dean opens each term when it starts."}
         actions={
           <Button onClick={() => setDialog(true)} disabled={loading || !!error}
             style={{ backgroundColor: "var(--maroon)", color: "#fff" }}>
@@ -66,11 +72,23 @@ export function MarksList() {
           <div className="flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between">
             <Tabs value={tab} onValueChange={setTab}>
               <TabsList>
-                <TabsTrigger value="all">All ({items.length})</TabsTrigger>
+                <TabsTrigger value="all">All ({inTerm.length})</TabsTrigger>
                 <TabsTrigger value="draft">Drafts ({drafts})</TabsTrigger>
-                <TabsTrigger value="submitted">Submitted ({items.length - drafts})</TabsTrigger>
+                <TabsTrigger value="submitted">Submitted ({inTerm.length - drafts})</TabsTrigger>
               </TabsList>
             </Tabs>
+            <div className="flex flex-col sm:flex-row gap-2">
+            <Select value={termFilter ?? "all"} onValueChange={setTermFilter}>
+              <SelectTrigger className="w-full sm:w-48 bg-white" aria-label="Term"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {options?.terms.map((t) => (
+                  <SelectItem key={t.id} value={String(t.id)}>
+                    {t.name}{t.status === "active" ? " (current)" : t.status === "closed" ? " (closed)" : " (not open)"}
+                  </SelectItem>
+                ))}
+                <SelectItem value="all">All terms</SelectItem>
+              </SelectContent>
+            </Select>
             <Select value={category} onValueChange={setCategory}>
               <SelectTrigger className="w-full sm:w-44 bg-white"><SelectValue /></SelectTrigger>
               <SelectContent>
@@ -78,11 +96,12 @@ export function MarksList() {
                 {CATEGORIES.map((c) => <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>)}
               </SelectContent>
             </Select>
+            </div>
           </div>
 
           {shown.length === 0 ? (
-            <EmptyState icon={<ClipboardList size={44} />} title={items.length ? "Nothing matches these filters" : "No assessments yet"}>
-              {items.length ? "Try another tab or category." : "Create an assessment for a quiz, homework or exam, then enter each pupil's mark."}
+            <EmptyState icon={<ClipboardList size={44} />} title={inTerm.length ? "Nothing matches these filters" : "No assessments yet"}>
+              {inTerm.length ? "Try another tab or category." : "Create an assessment for a quiz, homework or exam, then enter each pupil's mark."}
             </EmptyState>
           ) : (
             <div className="grid gap-3">
@@ -97,8 +116,10 @@ export function MarksList() {
                         <div className="flex flex-wrap items-center gap-2">
                           <CategoryBadge category={a.category} />
                           <StatusBadge status={a.status} />
-                          {a.term_status === "closed" && (
-                            <span className="text-xs" style={{ color: "var(--mid-gray)" }}>Term closed</span>
+                          {a.term_status !== "active" && (
+                            <span className="text-xs" style={{ color: "var(--mid-gray)" }}>
+                              {a.term_status === "closed" ? "Term closed" : "Term not open"}
+                            </span>
                           )}
                         </div>
                         <div className="mt-2 font-semibold truncate" style={{ color: "var(--dark-gray)" }}>{a.title}</div>

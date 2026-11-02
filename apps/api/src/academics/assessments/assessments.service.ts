@@ -246,13 +246,11 @@ export class AssessmentsService {
     term.status = 'active';
     const saved = await this.termRepo.save(term);
 
-    await this.notificationsService.notifyRoles(
-      ['dean', 'principal', 'teacher'],
+    await this.announceTerm(
       reopening
         ? `${term.name} has been reopened. Marks for it can be changed again until it is closed.`
         : `${term.name} is now open. New marks are recorded in ${term.name}.`,
       reopening ? 'warning' : 'info',
-      '/teacher/marks',
     );
     return saved;
   }
@@ -277,13 +275,17 @@ export class AssessmentsService {
     term.status = 'closed';
     const saved = await this.termRepo.save(term);
 
-    await this.notificationsService.notifyRoles(
-      ['dean', 'principal', 'teacher'],
-      `${term.name} has been closed. Its marks are now final.`,
-      'info',
-      '/dean/terms',
-    );
+    await this.announceTerm(`${term.name} has been closed. Its marks are now final.`, 'info');
     return saved;
+  }
+
+  /** Each role's link goes to a page that role can open. */
+  private async announceTerm(message: string, type: 'info' | 'warning') {
+    await Promise.all([
+      this.notificationsService.notifyRoles(['dean'], message, type, '/dean/terms'),
+      this.notificationsService.notifyRoles(['teacher'], message, type, '/teacher/marks'),
+      this.notificationsService.notifyRoles(['principal'], message, type),
+    ]);
   }
 
   private async assertNoOverlap(yearId: number, start: string, end: string, exceptId?: number) {

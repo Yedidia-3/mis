@@ -56,7 +56,7 @@ export function MarksSheet() {
   }, [id]);
   useEffect(() => { load(); }, [load]);
 
-  const editable = data?.status === "draft" && data.term_status !== "closed";
+  const editable = data?.status === "draft" && data.term_status === "active";
 
   const rowErrors = useMemo(() => {
     const out: Record<number, string | null> = {};
@@ -177,6 +177,8 @@ export function MarksSheet() {
           <Lock size={16} className="mt-0.5 flex-shrink-0" style={{ color: "var(--mid-gray)" }} />
           {data.term_status === "closed"
             ? `${data.term_name} is closed, so these marks are final.`
+            : data.term_status !== "active"
+            ? `${data.term_name} is not open. Marks can be changed only while the dean has the term open.`
             : `Submitted ${data.submitted_at ? formatDate(data.submitted_at) : ""}. Reopen it to correct a mark; the dean is told when you do.`}
         </div>
       )}
@@ -269,7 +271,7 @@ export function MarksSheet() {
               Submit to dean
             </Button>
           </>
-        ) : data.status === "submitted" && data.term_status !== "closed" ? (
+        ) : data.status === "submitted" && data.term_status === "active" ? (
           <Button variant="outline" onClick={() => setConfirm("reopen")} disabled={!!busy}>
             {busy === "reopen" ? <Loader2 size={16} className="mr-1.5 animate-spin" /> : <RotateCcw size={16} className="mr-1.5" />}
             Reopen to correct
