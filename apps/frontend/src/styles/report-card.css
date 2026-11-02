@@ -1,0 +1,69 @@
+/* The school's "School Report" sheet: Garamond 10pt, bold labels, the MAXIMUM
+   columns lightly shaded, two bulletins side by side on a landscape page. */
+.report-card {
+  font-family: Garamond, "EB Garamond", "Cormorant Garamond", "Times New Roman", serif;
+  font-size: 10pt;
+  line-height: 1.25;
+  color: #000;
+  background: #fff;
+  width: 100%;
+  max-width: 135mm;
+  margin: 0 auto;
+}
+.rc-logo { display: block; height: 22mm; width: auto; margin: 0 0 1mm 2mm; }
+.rc-head { display: grid; grid-template-columns: 1fr auto; column-gap: 12px; font-weight: 700; }
+.rc-left > div, .rc-right > div { min-height: 1.3em; white-space: nowrap; }
+.rc-left { text-align: left; }
+.rc-right { padding-right: 4mm; }
+.rc-pair { display: flex; gap: 2.5em; }
+.rc-title { text-align: center; margin: 1em 0 0.2em; }
+.rc-title span {
+  display: inline-block; font-size: 11pt; font-weight: 700;
+  border-top: 1px solid #000; border-bottom: 1px solid #000; padding: 1px 2.5em;
+}
+.rc-name { display: grid; grid-template-columns: 33.6% 1fr; align-items: end; font-weight: 700; margin-bottom: 0.15em; }
+.rc-name-label { text-align: left; padding: 0.55em 0 0.15em; }
+.rc-name-value { text-align: center; border-bottom: 1px solid #000; padding: 0.55em 0 0.15em; }
+
+.rc-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.rc-table th, .rc-table td { border: 1px solid #000; padding: 1px 3px; height: 17px; }
+.rc-table th { font-weight: 700; text-align: center; }
+.rc-course { font-weight: 700; text-align: left; word-wrap: break-word; }
+.rc-table th.rc-course { text-align: left; vertical-align: top; }
+.rc-table thead tr + tr th { text-align: left; }
+.rc-course.rc-sub { font-weight: 400; }
+.rc-max {
+  background: #efefef; font-weight: 700; text-align: right;
+  -webkit-print-color-adjust: exact; print-color-adjust: exact;
+}
+.rc-table tr:first-child th.rc-max { text-align: center; }
+.rc-center { text-align: center !important; }
+.rc-v { text-align: right; font-weight: 400; }
+.rc-group td { font-weight: 700; }
+.rc-foot td { font-weight: 700; height: 22px; }
+.rc-right-num { text-align: right; }
+.rc-place { text-align: center; border-left: none !important; border-right: none !important; }
+.rc-place:last-child { border-right: 1px solid #000 !important; }
+.rc-place-pad { border-right: none !important; }
+.rc-place + .rc-place, .rc-place-pad + .rc-place { border-left: none !important; }
+.rc-sur { font-style: italic; }
+.rc-sign td { height: 30px; }
+.rc-flag { background: #fde8e8; outline: 2px solid #c0392b; outline-offset: -2px; cursor: help; }
+
+.print-root { display: none; }
+
+@media print {
+  @page { size: landscape; margin: 7mm 6mm 7mm 6mm; }
+  html, body { height: auto !important; background: #fff !important; }
+  body > #root { display: none !important; }
+  [data-sonner-toaster] { display: none !important; }
+  .print-root { display: block !important; }
+  .print-page {
+    display: grid; grid-template-columns: 1fr 1fr; column-gap: 10mm; align-items: start;
+    break-after: page; page-break-after: always; break-inside: avoid;
+  }
+  .print-page:last-child { break-after: auto; page-break-after: auto; }
+  /* The sheet itself prints at 87%. */
+  .report-card { max-width: none; zoom: 0.87; }
+  .rc-flag { background: none !important; outline: none !important; }
+}

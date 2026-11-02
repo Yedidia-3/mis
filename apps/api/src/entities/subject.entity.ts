@@ -3,6 +3,7 @@ import {
 } from 'typeorm';
 import { PLevel } from './p-level.entity';
 import { CourseCatalogue } from './course-catalogue.entity';
+import { numericTransformer } from './numeric.transformer';
 
 // A subject taught at one P-level. Scoped per level because P1 and P6 do not
 // take the same subjects.
@@ -50,6 +51,15 @@ export class Subject {
   // subjects added manually before the catalogue existed.
   @Column({ nullable: true })
   catalogue_id: number | null;
+
+  // Report maximum for each half of the bulletin: TJ is out of this, EXAM is
+  // out of this, and the subject total is out of twice this.
+  @Column({ type: 'numeric', precision: 6, scale: 2, nullable: true, transformer: numericTransformer })
+  report_max: number | null;
+
+  // Heading the subject sits under on the bulletin, e.g. ENGLISH or FRANÇAIS.
+  @Column({ length: 40, nullable: true })
+  report_group: string | null;
 
   @Column({ type: 'enum', enum: ['active', 'inactive'], default: 'active' })
   status: 'active' | 'inactive';

@@ -4,6 +4,9 @@ import {
 import { AcademicYear } from './academic-year.entity';
 import { numericTransformer } from './numeric.transformer';
 
+export type AssessmentCategory = 'quiz' | 'homework' | 'exam';
+export const ASSESSMENT_CATEGORIES: AssessmentCategory[] = ['quiz', 'homework', 'exam'];
+
 // The kinds of assessment a teacher may record, and how much each counts
 // toward the term grade. The dean maintains these; teachers pick from them and
 // cannot invent their own.
@@ -28,6 +31,10 @@ export class AssessmentType {
   // one year these are expected to total 100.
   @Column({ type: 'numeric', precision: 5, scale: 2, transformer: numericTransformer })
   weight: number;
+
+  // Quiz and homework fill the report's TJ column; exam fills its EXAM column.
+  @Column({ type: 'enum', enum: ['quiz', 'homework', 'exam'], enumName: 'assessment_types_category_enum', nullable: true })
+  category: AssessmentCategory | null;
 
   @Column({ type: 'int', default: 0 })
   display_order: number;

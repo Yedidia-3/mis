@@ -1,46 +1,72 @@
 import {
-  IsDateString, IsEnum, IsInt, IsNumber, IsOptional, IsString, Max, MaxLength, Min,
+  IsBoolean, IsEnum, IsInt, IsNumber, IsOptional, IsString, Length, Matches, Max, MaxLength, Min,
 } from 'class-validator';
+import { Type } from 'class-transformer';
+import { IsRealDate } from './assessment.dto';
+import { NormaliseText, RULES } from './input-rules';
+
+const TERM_NAME_MESSAGE = 'Term name may contain only letters, digits, spaces and . , \' ( ) - / & : #';
 
 // ─── Terms ───────────────────────────────────────────────────────────────────
 
 export class CreateTermDto {
   @IsInt()
+  @Min(1)
+  @Max(RULES.ID_MAX)
   academic_year_id: number;
 
+  @NormaliseText()
   @IsString()
-  @MaxLength(40)
+  @Length(2, 40)
+  @Matches(RULES.TITLE_PATTERN, { message: TERM_NAME_MESSAGE })
   name: string;
 
   @IsInt()
   @Min(1)
-  @Max(12)
+  @Max(3)
   sequence: number;
 
-  @IsDateString()
+  @IsRealDate()
   start_date: string;
 
-  @IsDateString()
+  @IsRealDate()
   end_date: string;
 }
 
 export class UpdateTermDto {
   @IsOptional()
+  @NormaliseText()
   @IsString()
-  @MaxLength(40)
+  @Length(2, 40)
+  @Matches(RULES.TITLE_PATTERN, { message: TERM_NAME_MESSAGE })
   name?: string;
 
   @IsOptional()
-  @IsDateString()
+  @IsRealDate()
   start_date?: string;
 
   @IsOptional()
-  @IsDateString()
+  @IsRealDate()
   end_date?: string;
 
+}
+
+const YEAR_ID_MESSAGE = 'academic_year_id must be a whole number above 0';
+
+export class TermsOverviewQueryDto {
   @IsOptional()
-  @IsEnum(['upcoming', 'active', 'closed'])
-  status?: 'upcoming' | 'active' | 'closed';
+  @Type(() => Number)
+  @IsInt({ message: YEAR_ID_MESSAGE })
+  @Min(1, { message: YEAR_ID_MESSAGE })
+  @Max(RULES.ID_MAX, { message: YEAR_ID_MESSAGE })
+  academic_year_id?: number;
+}
+
+/** A term's status moves only through the open and close actions, never through an edit. */
+export class CloseTermDto {
+  @IsOptional()
+  @IsBoolean()
+  confirm_drafts?: boolean;
 }
 
 // ─── Course catalogue ────────────────────────────────────────────────────────

@@ -9,6 +9,7 @@ import { Attendance } from '../entities/attendance.entity';
 import { Class } from '../entities/class.entity';
 import { CourseCatalogue } from '../entities/course-catalogue.entity';
 import { PLevel } from '../entities/p-level.entity';
+import { ReportCard } from '../entities/report-card.entity';
 import { ShuffleResult } from '../entities/shuffle-result.entity';
 import { ShuffleSession } from '../entities/shuffle-session.entity';
 import { Student } from '../entities/student.entity';
@@ -24,6 +25,9 @@ import { AssessmentsService } from './assessments/assessments.service';
 import { GradesController } from './assessments/grades.controller';
 import { GradesService } from './assessments/grades.service';
 import { ExportService } from './export.service';
+import { RecordsController, ReportsController } from './records/records.controller';
+import { RecordsService } from './records/records.service';
+import { ReportsService } from './records/reports.service';
 import { ShuffleController } from './shuffle/shuffle.controller';
 import { ShuffleService } from './shuffle/shuffle.service';
 import { TeachingController } from './teaching/teaching.controller';
@@ -35,17 +39,19 @@ import { TeachingService } from './teaching/teaching.service';
       PLevel, Class, Student, ShuffleSession, ShuffleResult, AcademicYear,
       Attendance, AttendanceSession,
       Term, Subject, AssessmentType, Assessment, AssessmentScore,
-      TeachingAssignment, User, CourseCatalogue,
+      TeachingAssignment, User, CourseCatalogue, ReportCard,
     ]),
     NotificationsModule,
   ],
   controllers: [
     AcademicsController, ShuffleController,
     AssessmentsController, GradesController, TeachingController,
+    RecordsController, ReportsController,
   ],
   providers: [
     AcademicsService, ExportService, ShuffleService,
     AssessmentsService, GradesService, TeachingService,
+    RecordsService, ReportsService,
   ],
   exports: [AcademicsService, ExportService, AssessmentsService, GradesService, TeachingService],
 })
