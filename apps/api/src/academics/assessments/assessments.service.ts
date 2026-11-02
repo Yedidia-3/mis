@@ -1,5 +1,5 @@
 import {
-  BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException,
+  BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -16,7 +16,7 @@ import { NotificationsService } from '../../notifications/notifications.service'
 import {
   CreateAssessmentTypeDto, CreateSubjectDto, CreateTermDto,
   UpdateAssessmentTypeDto, UpdateSubjectDto, UpdateTermDto,
-  CreateCatalogueEntryDto, UpdateCatalogueEntryDto, AssignPLevelDto,
+  CreateCatalogueEntryDto, UpdateCatalogueEntryDto, AssignPLevelDto, CloseTermDto,
 } from './dto/config.dto';
 import { CreateAssessmentDto, SaveScoresDto, UpdateAssessmentDto } from './dto/assessment.dto';
 import { summariseAssessment } from './grade-calculator';
@@ -145,6 +145,39 @@ export class AssessmentsService {
     });
   }
 
+  /**
+   * The dean's term control page: the active year's terms with how many
+   * assessments each holds, so closing a term never surprises anyone.
+   */
+  async termsOverview(academicYearId?: number) {
+    const year = academicYearId
+      ? (await this.classRepo.query(`SELECT id, name, status FROM academic_years WHERE id = $1`, [academicYearId]))[0]
+      : await this.activeYear();
+    if (!year) return { academic_year: null, current_term_id: null, terms: [] };
+
+    const terms = await this.termRepo.find({ where: { academic_year_id: year.id }, order: { sequence: 'ASC' } });
+    const counts: { term_id: number; drafts: string; submitted: string }[] = await this.assessmentRepo.query(
+      `SELECT term_id,
+              COUNT(*) FILTER (WHERE status = 'draft')     AS drafts,
+              COUNT(*) FILTER (WHERE status = 'submitted') AS submitted
+       FROM assessments WHERE term_id = ANY($1) GROUP BY term_id`,
+      [terms.map((t) => t.id)],
+    );
+    const byTerm = new Map(counts.map((c) => [c.term_id, c]));
+    const current = terms.find((t) => t.status === 'active') ?? null;
+
+    return {
+      academic_year: { id: year.id, name: year.name },
+      current_term_id: current?.id ?? null,
+      terms: terms.map((t) => ({
+        id: t.id, name: t.name, sequence: t.sequence,
+        start_date: t.start_date, end_date: t.end_date, status: t.status,
+        drafts: Number(byTerm.get(t.id)?.drafts ?? 0),
+        submitted: Number(byTerm.get(t.id)?.submitted ?? 0),
+      })),
+    };
+  }
+
   async createTerm(dto: CreateTermDto) {
     if (dto.end_date < dto.start_date) {
       throw new BadRequestException('Term end date cannot precede its start date');
@@ -155,32 +188,114 @@ export class AssessmentsService {
     if (clash) {
       throw new BadRequestException(`Term ${dto.sequence} already exists for this year`);
     }
-    return this.termRepo.save(this.termRepo.create(dto));
+    await this.assertNoOverlap(dto.academic_year_id, dto.start_date, dto.end_date);
+    return this.termRepo.save(this.termRepo.create({ ...dto, status: 'upcoming' }));
   }
 
   async updateTerm(id: number, dto: UpdateTermDto) {
     const term = await this.termRepo.findOne({ where: { id } });
     if (!term) throw new NotFoundException('Term not found');
-
-    Object.assign(term, dto);
-    if (term.end_date < term.start_date) {
-      throw new BadRequestException('Term end date cannot precede its start date');
+    if (term.status === 'closed') {
+      throw new BadRequestException(`${term.name} is closed. Reopen it before changing its name or dates.`);
     }
 
-    const saved = await this.termRepo.save(term);
+    const start = dto.start_date ?? term.start_date;
+    const end = dto.end_date ?? term.end_date;
+    if (end < start) {
+      throw new BadRequestException('Term end date cannot precede its start date');
+    }
+    await this.assertNoOverlap(term.academic_year_id, start, end, term.id);
 
-    // Closing a term finalises its marks, so the people who sign off on
-    // reports need to know it happened.
-    if (dto.status === 'closed') {
-      await this.notificationsService.notifyRoles(
-        ['dean', 'principal'],
-        `${term.name} has been closed. Its marks are now final.`,
-        'info',
-        `/dean/terms`,
+    // Shrinking a term must not strand marks already dated inside it.
+    const outside: { n: string }[] = await this.assessmentRepo.query(
+      `SELECT COUNT(*) AS n FROM assessments WHERE term_id = $1 AND (date < $2 OR date > $3)`,
+      [term.id, start, end],
+    );
+    if (Number(outside[0]?.n ?? 0) > 0) {
+      throw new BadRequestException(
+        `${outside[0].n} assessment(s) in ${term.name} are dated outside ${start} to ${end}. Keep the dates wide enough to include them.`,
       );
     }
 
+    if (dto.name !== undefined) term.name = dto.name;
+    term.start_date = start;
+    term.end_date = end;
+    return this.termRepo.save(term);
+  }
+
+  /**
+   * Make a term the current one. Only one term per year is open at a time,
+   * so teachers always record into the term the dean chose.
+   */
+  async openTerm(id: number) {
+    const term = await this.termRepo.findOne({ where: { id } });
+    if (!term) throw new NotFoundException('Term not found');
+    if (term.status === 'active') throw new BadRequestException(`${term.name} is already open`);
+
+    const year = await this.classRepo.query(`SELECT status FROM academic_years WHERE id = $1`, [term.academic_year_id]);
+    if (year[0]?.status !== 'active') {
+      throw new BadRequestException('Terms can only be opened in the active academic year');
+    }
+
+    const other = await this.termRepo.findOne({ where: { academic_year_id: term.academic_year_id, status: 'active' } });
+    if (other) {
+      throw new ConflictException(`${other.name} is still open. Close it before opening ${term.name}.`);
+    }
+
+    const reopening = term.status === 'closed';
+    term.status = 'active';
+    const saved = await this.termRepo.save(term);
+
+    await this.notificationsService.notifyRoles(
+      ['dean', 'principal', 'teacher'],
+      reopening
+        ? `${term.name} has been reopened. Marks for it can be changed again until it is closed.`
+        : `${term.name} is now open. New marks are recorded in ${term.name}.`,
+      reopening ? 'warning' : 'info',
+      '/teacher/marks',
+    );
     return saved;
+  }
+
+  /** Finalise a term's marks. Unsubmitted drafts must be acknowledged, since they will not reach a report. */
+  async closeTerm(id: number, dto: CloseTermDto) {
+    const term = await this.termRepo.findOne({ where: { id } });
+    if (!term) throw new NotFoundException('Term not found');
+    if (term.status !== 'active') throw new BadRequestException(`${term.name} is not open`);
+
+    const drafts: { n: string }[] = await this.assessmentRepo.query(
+      `SELECT COUNT(*) AS n FROM assessments WHERE term_id = $1 AND status = 'draft'`,
+      [term.id],
+    );
+    const draftCount = Number(drafts[0]?.n ?? 0);
+    if (draftCount > 0 && !dto.confirm_drafts) {
+      throw new ConflictException(
+        `${draftCount} assessment(s) in ${term.name} are still drafts and will not appear on reports. Confirm to close anyway.`,
+      );
+    }
+
+    term.status = 'closed';
+    const saved = await this.termRepo.save(term);
+
+    await this.notificationsService.notifyRoles(
+      ['dean', 'principal', 'teacher'],
+      `${term.name} has been closed. Its marks are now final.`,
+      'info',
+      '/dean/terms',
+    );
+    return saved;
+  }
+
+  private async assertNoOverlap(yearId: number, start: string, end: string, exceptId?: number) {
+    const clash: { name: string }[] = await this.termRepo.query(
+      `SELECT name FROM terms
+       WHERE academic_year_id = $1 AND id <> $2 AND start_date <= $4 AND end_date >= $3
+       LIMIT 1`,
+      [yearId, exceptId ?? 0, start, end],
+    );
+    if (clash.length) {
+      throw new BadRequestException(`These dates overlap ${clash[0].name}`);
+    }
   }
 
   // ─── Dean configuration: subjects ────────────────────────────────────────────
@@ -369,11 +484,15 @@ export class AssessmentsService {
     }
   }
 
+  /** Marks are written only into the term the dean has opened. */
   private async assertTermOpen(termId: number) {
     const term = await this.termRepo.findOne({ where: { id: termId } });
     if (!term) throw new NotFoundException('Term not found');
     if (term.status === 'closed') {
       throw new BadRequestException(`${term.name} is closed — its marks are final`);
+    }
+    if (term.status !== 'active') {
+      throw new BadRequestException(`${term.name} has not been opened yet. Marks go into the current term.`);
     }
     return term;
   }
@@ -410,7 +529,7 @@ export class AssessmentsService {
   async getRecordingOptions(user: User) {
     const year = await this.activeYear();
     if (!year) {
-      return { academic_year: null, classes: [], terms: [], categories: ASSESSMENT_CATEGORIES };
+      return { academic_year: null, current_term_id: null, classes: [], terms: [], categories: ASSESSMENT_CATEGORIES };
     }
 
     const classes: any[] = await this.classRepo.query(
@@ -461,6 +580,7 @@ export class AssessmentsService {
 
     return {
       academic_year: { id: year.id, name: year.name },
+      current_term_id: terms.find((t) => t.status === 'active')?.id ?? null,
       classes: result,
       terms: terms.map((t) => ({
         id: t.id, name: t.name, sequence: t.sequence,
@@ -575,6 +695,7 @@ export class AssessmentsService {
   async deleteAssessment(id: number, user: User) {
     const assessment = await this.loadForTeacher(id, user);
     this.assertEditable(assessment);
+    await this.assertTermOpen(assessment.term_id);
 
     await this.assessmentRepo.remove(assessment);
     return { message: 'Draft assessment deleted' };

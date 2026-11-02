@@ -10,7 +10,8 @@ import { AssessmentsService } from './assessments.service';
 import {
   CreateAssessmentTypeDto, CreateSubjectDto, CreateTermDto,
   UpdateAssessmentTypeDto, UpdateSubjectDto, UpdateTermDto,
-  CreateCatalogueEntryDto, UpdateCatalogueEntryDto, AssignPLevelDto,
+  CreateCatalogueEntryDto, UpdateCatalogueEntryDto, AssignPLevelDto, CloseTermDto,
+  TermsOverviewQueryDto,
 } from './dto/config.dto';
 import { CreateAssessmentDto, SaveScoresDto, UpdateAssessmentDto } from './dto/assessment.dto';
 
@@ -59,6 +60,24 @@ export class AssessmentsController {
   @Roles('dean', 'principal', 'teacher', 'super_admin')
   listTerms(@Query('academic_year_id', ParseIntPipe) yearId: number) {
     return this.assessmentsService.listTerms(yearId);
+  }
+
+  @Get('terms/overview')
+  @Roles('dean', 'principal', 'super_admin')
+  termsOverview(@Query() query: TermsOverviewQueryDto) {
+    return this.assessmentsService.termsOverview(query.academic_year_id);
+  }
+
+  @Post('terms/:id/open')
+  @Roles('dean')
+  openTerm(@Param('id', ParseIntPipe) id: number) {
+    return this.assessmentsService.openTerm(id);
+  }
+
+  @Post('terms/:id/close')
+  @Roles('dean')
+  closeTerm(@Param('id', ParseIntPipe) id: number, @Body() dto: CloseTermDto) {
+    return this.assessmentsService.closeTerm(id, dto);
   }
 
   @Post('terms')
