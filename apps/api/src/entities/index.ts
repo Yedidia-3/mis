@@ -12,6 +12,7 @@ import { Enrollment } from './enrollment.entity';
 import { FeedingPrice } from './feeding-price.entity';
 import { Notification } from './notification.entity';
 import { PLevel } from './p-level.entity';
+import { ReportCard } from './report-card.entity';
 import { ShuffleResult } from './shuffle-result.entity';
 import { ShuffleSession } from './shuffle-session.entity';
 import { Student } from './student.entity';
@@ -43,6 +44,7 @@ export const entities = [
   FeedingPrice,
   Notification,
   PLevel,
+  ReportCard,
   ShuffleResult,
   ShuffleSession,
   Student,
@@ -68,6 +70,7 @@ export {
     FeedingPrice,
     Notification,
     PLevel,
+    ReportCard,
     ShuffleResult,
     ShuffleSession,
     Student,

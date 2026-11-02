@@ -134,6 +134,12 @@ export class AssessmentsController {
     return this.assessmentsService.listMyAssessments(user);
   }
 
+  @Get('recording-options')
+  @Roles('teacher')
+  recordingOptions(@CurrentUser() user: User) {
+    return this.assessmentsService.getRecordingOptions(user);
+  }
+
   // ─── Supervisors' oversight list ─────────────────────────────────────────────
 
   @Get()
