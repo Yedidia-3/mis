@@ -1,5 +1,5 @@
 /* The school's "School Report" sheet: Garamond 10pt, bold labels, the MAXIMUM
-   columns shaded grey, two bulletins side by side on a landscape page. */
+   columns lightly shaded, two bulletins side by side on a landscape page. */
 .report-card {
   font-family: Garamond, "EB Garamond", "Cormorant Garamond", "Times New Roman", serif;
   font-size: 10pt;
@@ -10,6 +10,7 @@
   max-width: 135mm;
   margin: 0 auto;
 }
+.rc-logo { display: block; height: 15mm; width: auto; margin: 0 0 1mm 2mm; }
 .rc-head { display: grid; grid-template-columns: 1fr auto; column-gap: 12px; font-weight: 700; }
 .rc-left > div, .rc-right > div { min-height: 1.3em; white-space: nowrap; }
 .rc-left { text-align: left; }
@@ -32,7 +33,7 @@
 .rc-table thead tr + tr th { text-align: left; }
 .rc-course.rc-sub { font-weight: 400; }
 .rc-max {
-  background: #969696; font-weight: 700; text-align: right;
+  background: #efefef; font-weight: 700; text-align: right;
   -webkit-print-color-adjust: exact; print-color-adjust: exact;
 }
 .rc-table tr:first-child th.rc-max { text-align: center; }
@@ -46,7 +47,7 @@
 .rc-place-pad { border-right: none !important; }
 .rc-place + .rc-place, .rc-place-pad + .rc-place { border-left: none !important; }
 .rc-sur { font-style: italic; }
-.rc-sign td { height: 32px; }
+.rc-sign td { height: 30px; }
 .rc-flag { background: #fde8e8; outline: 2px solid #c0392b; outline-offset: -2px; cursor: help; }
 
 .print-root { display: none; }
@@ -62,6 +63,7 @@
     break-after: page; page-break-after: always; break-inside: avoid;
   }
   .print-page:last-child { break-after: auto; page-break-after: auto; }
-  .report-card { max-width: none; }
+  /* The sheet itself prints at 87%. */
+  .report-card { max-width: none; zoom: 0.87; }
   .rc-flag { background: none !important; outline: none !important; }
 }

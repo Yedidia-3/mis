@@ -1,5 +1,6 @@
 import "../../../../styles/report-card.css";
 import { Fragment } from "react";
+import logo from "../../../../assets/images/official-logo.png";
 
 export interface Cell { value: number | null; max: number | null; flags: { code: string; message: string }[] }
 export interface SubjectLine {
@@ -43,7 +44,7 @@ function grouped(subjects: SubjectLine[]) {
  * One pupil's bulletin, laid out as the school's "School Report" sheet: the
  * authority block and year/class/term on top, BULLETIN SCOLAIRE, the pupil's
  * name, then COURS | MAXIMUM (TJ EXAM TOT) | period (TJ EXAM TOT), TOTAL,
- * POURCENTAGE, PLACE … Sur …, and the signature rows.
+ * POURCENTAGE, PLACE … Sur …, and the signature rows, under the school logo.
  *
  * With highlightFlags the cells that were zeroed or guessed are outlined and
  * titled with the reason, for the dean's review; printed copies never show it.
@@ -67,6 +68,7 @@ export function ReportCard({ card, highlightFlags = false }: { card: CardData; h
 
   return (
     <article className="report-card">
+      <img src={logo} alt="Jericho School" className="rc-logo" />
       <header className="rc-head">
         <div className="rc-left">
           <div>{h.country}</div>
@@ -171,7 +173,7 @@ export function ReportCard({ card, highlightFlags = false }: { card: CardData; h
             <td className="rc-place rc-sur">Sur</td>
             <td className="rc-place">{card.class_size}</td>
           </tr>
-          {["SIGNATURE DES PARENTS", "SIGNATURE DU TITULAIRE", "OBSERVATION"].map((label) => (
+          {["SIGNATURE DES PARENTS", "SIGNATURE DU MAÎTRE", "OBSERVATION"].map((label) => (
             <tr key={label} className="rc-sign">
               <td className="rc-course">{label}</td>
               <td colSpan={6} />
