@@ -10,7 +10,7 @@
   max-width: 135mm;
   margin: 0 auto;
 }
-.rc-logo { display: block; height: 15mm; width: auto; margin: 0 0 1mm 2mm; }
+.rc-logo { display: block; height: 22mm; width: auto; margin: 0 0 1mm 2mm; }
 .rc-head { display: grid; grid-template-columns: 1fr auto; column-gap: 12px; font-weight: 700; }
 .rc-left > div, .rc-right > div { min-height: 1.3em; white-space: nowrap; }
 .rc-left { text-align: left; }
