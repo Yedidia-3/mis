@@ -1,26 +1,13 @@
 import {
   Body, Controller, Delete, Get, Param, ParseIntPipe, Post, Put, Query, UseGuards,
 } from '@nestjs/common';
-import { Type } from 'class-transformer';
-import { IsArray, IsInt, ValidateNested } from 'class-validator';
 import { CurrentUser } from '../../auth/current-user.decorator';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/guards/roles.guard';
 import { Roles } from '../../auth/roles.decorator';
 import { User } from '../../entities/user.entity';
 import { TeachingService } from './teaching.service';
-
-export class AssignSubjectsDto {
-  @IsInt()
-  teacher_id: number;
-
-  @IsInt()
-  class_id: number;
-
-  @IsArray()
-  @IsInt({ each: true })
-  subject_ids: number[];
-}
+import { AssignBatchDto, AssignSubjectsDto, TeachingYearOptionalQueryDto, TeachingYearQueryDto } from './dto/teaching.dto';
 
 @Controller('api/v1/academics/teaching')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -37,14 +24,31 @@ export class TeachingController {
   /** Every teacher's load — including those with nothing assigned yet. */
   @Get('loads')
   @Roles('dean', 'principal', 'super_admin')
-  loads(@Query('academic_year_id', ParseIntPipe) yearId: number) {
-    return this.teachingService.listTeacherLoads(yearId);
+  loads(@Query() query: TeachingYearQueryDto) {
+    return this.teachingService.listTeacherLoads(query.academic_year_id);
+  }
+
+  /** Per-class subject coverage for the year — gaps are subjects with no teacher. */
+  @Get('coverage')
+  @Roles('dean', 'principal', 'super_admin')
+  coverage(@Query() query: TeachingYearQueryDto) {
+    return this.teachingService.classCoverage(query.academic_year_id);
+  }
+
+  /** Teachers plus class/subject board used by the assignment screen. */
+  @Get('board')
+  @Roles('dean', 'principal', 'super_admin')
+  board(@Query() query: TeachingYearQueryDto) {
+    return this.teachingService.assignmentBoard(query.academic_year_id);
   }
 
   @Get('teachers/:teacherId')
   @Roles('dean', 'principal', 'super_admin')
-  forTeacher(@Param('teacherId', ParseIntPipe) teacherId: number) {
-    return this.teachingService.getTeacherAssignments(teacherId);
+  forTeacher(
+    @Param('teacherId', ParseIntPipe) teacherId: number,
+    @Query() query: TeachingYearOptionalQueryDto,
+  ) {
+    return this.teachingService.getTeacherAssignments(teacherId, query.academic_year_id);
   }
 
   /** Subjects a teacher may record marks for in a class. */
@@ -61,6 +65,13 @@ export class TeachingController {
   @Roles('dean')
   assign(@Body() dto: AssignSubjectsDto) {
     return this.teachingService.assignSubjects(dto.teacher_id, dto.class_id, dto.subject_ids);
+  }
+
+  /** Assign one teacher across several classes (and levels) in one save. */
+  @Put('assign-batch')
+  @Roles('dean')
+  assignBatch(@Body() dto: AssignBatchDto) {
+    return this.teachingService.assignBatch(dto.teacher_id, dto.assignments);
   }
 
   /**
