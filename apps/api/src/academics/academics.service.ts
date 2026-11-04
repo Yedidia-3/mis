@@ -12,6 +12,7 @@ import { Student } from '../entities/student.entity';
 import { User } from '../entities/user.entity';
 import { NotificationsService } from '../notifications/notifications.service';
 import { TeachingService } from './teaching/teaching.service';
+import { defaultTeachingModel, TeachingModel } from './teaching-model';
 
 @Injectable()
 export class AcademicsService {
@@ -45,7 +46,7 @@ export class AcademicsService {
     // student count, and distribution status so the Dean's P-Levels module and
     // dashboard reflect distributed classes accurately.
     const plevels = await this.pLevelRepo.query(
-      `SELECT id, name, academic_year_id, status
+      `SELECT id, name, academic_year_id, status, teaching_model, max_periods_per_teacher
        FROM p_levels
        WHERE academic_year_id = $1 AND status = 'active'
        ORDER BY name ASC`,
@@ -101,8 +102,39 @@ export class AcademicsService {
     if (existing) {
       throw new BadRequestException(`A P-Level named "${cleanName}" already exists in this academic year.`);
     }
-    const pl = this.pLevelRepo.create({ name: cleanName, academic_year_id: academicYearId, status: 'active' });
+    const pl = this.pLevelRepo.create({
+      name: cleanName,
+      academic_year_id: academicYearId,
+      status: 'active',
+      teaching_model: defaultTeachingModel(cleanName),
+    });
     return this.pLevelRepo.save(pl);
+  }
+
+  /**
+   * Switch how a level organises teaching.
+   *
+   * Moving to specialist clears auto-generated "class teacher takes everything"
+   * rows so subject teachers can be assigned. Moving to class_teacher rebuilds
+   * those rows for every class that already has a class teacher.
+   */
+  async updatePLevelTeachingModel(id: number, teachingModel: TeachingModel) {
+    const pl = await this.pLevelRepo.findOne({ where: { id } });
+    if (!pl) throw new NotFoundException('P-Level not found');
+    if (pl.status !== 'active') throw new BadRequestException('That P-Level is not active');
+    if (teachingModel !== 'class_teacher' && teachingModel !== 'specialist') {
+      throw new BadRequestException('teaching_model must be class_teacher or specialist');
+    }
+    if (pl.teaching_model === teachingModel) return pl;
+
+    pl.teaching_model = teachingModel;
+    await this.pLevelRepo.save(pl);
+
+    const classes = await this.classRepo.find({ where: { p_level_id: id, status: 'active' } });
+    for (const cls of classes) {
+      await this.teachingService.syncClassTeacherAssignments(cls.id);
+    }
+    return pl;
   }
 
   async deletePLevel(id: number) {
@@ -190,6 +222,8 @@ export class AcademicsService {
     status?: string;
     page?: number;
     limit?: number;
+    /** When set, only students in these classes are returned (teacher portal). */
+    restrictClassIds?: number[];
   }) {
     // Join the real snake_case foreign keys. The relation metadata also has
     // leftover camelCase columns (currentClassId, pLevelId) that are empty, so
@@ -212,6 +246,15 @@ export class AcademicsService {
 
     if (params.pLevelId) where.push(`c.p_level_id = ${bind(params.pLevelId)}`);
     if (params.classId) where.push(`s.current_class_id = ${bind(params.classId)}`);
+    if (params.restrictClassIds) {
+      if (!params.restrictClassIds.length) {
+        return { data: [], total: 0, page: 1, limit: params.limit ?? 500 };
+      }
+      if (params.classId && !params.restrictClassIds.includes(params.classId)) {
+        throw new ForbiddenException('You can only open classes you are assigned to teach');
+      }
+      where.push(`s.current_class_id = ANY(${bind(params.restrictClassIds)}::int[])`);
+    }
 
     const statuses = ['active', 'repeating', 'promoted', 'transferred'];
     if (params.status && statuses.includes(params.status)) {
@@ -704,6 +747,7 @@ export class AcademicsService {
           name: normName,
           academic_year_id: year.id,
           status: 'active',
+          teaching_model: defaultTeachingModel(normName),
         });
         pl = await this.pLevelRepo.save(pl);
       }
@@ -1119,16 +1163,20 @@ export class AcademicsService {
   // ─── Teacher portal ───────────────────────────────────────────────────────────
 
   async getTeacherClasses(teacherId: number) {
-    // Only DISTRIBUTED classes from the ACTIVE year — a new year starts clean.
+    // Distributed classes in the active year where they are class teacher or
+    // hold at least one subject — specialists see only those classes.
     const classes = await this.classRepo.query(
       `SELECT c.id, c.name, c.p_level_id, pl.name AS p_level_name,
+              (c.teacher_id = $1) AS is_class_teacher,
               (SELECT COUNT(*) FROM students s WHERE s.current_class_id = c.id) AS student_count
        FROM classes c
        JOIN p_levels pl ON pl.id = c.p_level_id
-       WHERE c.teacher_id = $1
-         AND c.status = 'active'
+       LEFT JOIN teaching_assignments ta ON ta.class_id = c.id AND ta.teacher_id = $1
+       WHERE c.status = 'active'
          AND c.distributed_at IS NOT NULL
          AND pl.academic_year_id = (SELECT id FROM academic_years WHERE status = 'active' ORDER BY created_at DESC LIMIT 1)
+         AND (c.teacher_id = $1 OR ta.id IS NOT NULL)
+       GROUP BY c.id, c.name, c.p_level_id, pl.name, c.teacher_id
        ORDER BY pl.name ASC, c.name ASC`,
       [teacherId],
     );
@@ -1136,6 +1184,7 @@ export class AcademicsService {
       id: c.id,
       name: c.name,
       p_level: { id: c.p_level_id, name: c.p_level_name },
+      is_class_teacher: !!c.is_class_teacher,
       student_count: Number(c.student_count ?? 0),
     }));
   }
@@ -1334,10 +1383,46 @@ export class AcademicsService {
     return this.rejectStudentsBulk(students.map((s) => s.id), user);
   }
 
+  /**
+   * Teachers reach a class only as its class teacher or via a teaching
+   * assignment. A P4 teacher therefore cannot open a P6 class list.
+   */
   private async assertTeacherOwnsClass(classId: number, user: User) {
     if (user.role !== 'teacher') return;
-    const cls = await this.classRepo.findOne({ where: { id: classId, teacher_id: user.id, status: 'active' } });
-    if (!cls) throw new ForbiddenException('You can only manage your assigned classes');
+    const allowed = await this.classRepo.query(
+      `SELECT 1 FROM classes c
+       WHERE c.id = $1 AND c.status = 'active'
+         AND (
+           c.teacher_id = $2
+           OR EXISTS (
+             SELECT 1 FROM teaching_assignments ta
+             WHERE ta.class_id = c.id AND ta.teacher_id = $2
+           )
+         )
+       LIMIT 1`,
+      [classId, user.id],
+    );
+    if (!allowed.length) {
+      throw new ForbiddenException('You can only open classes you are assigned to teach');
+    }
+  }
+
+  /** Class ids this teacher may see: class teacher or subject assignment. */
+  async teacherVisibleClassIds(teacherId: number): Promise<number[]> {
+    const rows = await this.classRepo.query(
+      `SELECT DISTINCT c.id
+       FROM classes c
+       JOIN p_levels pl ON pl.id = c.p_level_id
+       LEFT JOIN teaching_assignments ta ON ta.class_id = c.id AND ta.teacher_id = $1
+       WHERE c.status = 'active'
+         AND c.distributed_at IS NOT NULL
+         AND pl.academic_year_id = (
+           SELECT id FROM academic_years WHERE status = 'active' ORDER BY created_at DESC LIMIT 1
+         )
+         AND (c.teacher_id = $1 OR ta.id IS NOT NULL)`,
+      [teacherId],
+    );
+    return rows.map((r: any) => Number(r.id));
   }
 
   async getClassStudentsForUser(classId: number, user: User) {

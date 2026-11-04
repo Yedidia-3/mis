@@ -19,15 +19,15 @@ export class PLevel {
    * How teaching is organised at this level.
    *
    * 'class_teacher' — one teacher takes every subject for their class, as in
-   * the lower primary years. Assigning that teacher to the class is enough:
-   * their subject assignments are generated from the level's subjects, so the
-   * dean enters nothing further.
+   * nursery and P1–P2. Assigning that teacher to the class is enough: their
+   * subject assignments are generated from the level's subjects.
    *
-   * 'specialist' — subjects are taught by different teachers across classes,
-   * as in the upper years, so each teacher's subjects are assigned explicitly.
+   * 'specialist' — subjects are taught by different teachers, as in P3–P6
+   * (e.g. one for English, one for Maths, one for Kinyarwanda & French). Each
+   * teacher's subjects are assigned explicitly on Teacher Assignments.
    *
-   * Held as data rather than inferred from the level's name, because "P1" is
-   * a label the school controls and code should not depend on how it is spelt.
+   * New levels default from their name (P3–P6 → specialist). The stored value
+   * is what the app uses afterwards, so the dean can override it.
    */
   @Column({ type: 'enum', enum: ['class_teacher', 'specialist'], default: 'class_teacher' })
   teaching_model: 'class_teacher' | 'specialist';

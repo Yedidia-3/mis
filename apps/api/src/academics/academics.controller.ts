@@ -12,6 +12,7 @@ import { Roles } from '../auth/roles.decorator';
 import { User } from '../entities/user.entity';
 import { AcademicsService } from './academics.service';
 import { ClassExportData, ExportService } from './export.service';
+import { UpdateTeachingModelDto } from './p-levels/dto/update-teaching-model.dto';
 
 @Controller('api/v1/academics')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -45,6 +46,13 @@ export class AcademicsController {
   @Roles('dean')
   createPLevel(@Body('name') name: string, @Body('academic_year_id') yearId: number) {
     return this.academicsService.createPLevel(name, yearId);
+  }
+
+  /** Nursery/P1–P2 stay class-teacher; P3–P6 are specialist by default. Dean can override. */
+  @Put('p-levels/:id/teaching-model')
+  @Roles('dean')
+  updateTeachingModel(@Param('id') id: string, @Body() dto: UpdateTeachingModelDto) {
+    return this.academicsService.updatePLevelTeachingModel(+id, dto.teaching_model);
   }
 
   @Delete('p-levels/:id')
@@ -90,7 +98,8 @@ export class AcademicsController {
   // Students
   @Get('students')
   @Roles('dean', 'principal', 'teacher', 'super_admin', 'accountant')
-  listStudents(
+  async listStudents(
+    @CurrentUser() user: User,
     @Query('academic_year_id') yearId?: string,
     @Query('p_level_id') pLevelId?: string,
     @Query('class_id') classId?: string,
@@ -99,7 +108,7 @@ export class AcademicsController {
     @Query('page') page?: string,
     @Query('limit') limit?: string,
   ) {
-    return this.academicsService.listStudents({
+    const params: Parameters<AcademicsService['listStudents']>[0] = {
       academicYearId: yearId ? +yearId : undefined,
       pLevelId: pLevelId ? +pLevelId : undefined,
       classId: classId ? +classId : undefined,
@@ -107,7 +116,11 @@ export class AcademicsController {
       status,
       page: page ? +page : undefined,
       limit: limit ? +limit : undefined,
-    });
+    };
+    if (user.role === 'teacher') {
+      params.restrictClassIds = await this.academicsService.teacherVisibleClassIds(user.id);
+    }
+    return this.academicsService.listStudents(params);
   }
 
   @Post('students/import')
