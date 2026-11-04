@@ -12,6 +12,7 @@ import { Student } from '../entities/student.entity';
 import { User } from '../entities/user.entity';
 import { NotificationsService } from '../notifications/notifications.service';
 import { TeachingService } from './teaching/teaching.service';
+import { defaultTeachingModel, TeachingModel } from './teaching-model';
 
 @Injectable()
 export class AcademicsService {
@@ -45,7 +46,7 @@ export class AcademicsService {
     // student count, and distribution status so the Dean's P-Levels module and
     // dashboard reflect distributed classes accurately.
     const plevels = await this.pLevelRepo.query(
-      `SELECT id, name, academic_year_id, status
+      `SELECT id, name, academic_year_id, status, teaching_model, max_periods_per_teacher
        FROM p_levels
        WHERE academic_year_id = $1 AND status = 'active'
        ORDER BY name ASC`,
@@ -101,8 +102,39 @@ export class AcademicsService {
     if (existing) {
       throw new BadRequestException(`A P-Level named "${cleanName}" already exists in this academic year.`);
     }
-    const pl = this.pLevelRepo.create({ name: cleanName, academic_year_id: academicYearId, status: 'active' });
+    const pl = this.pLevelRepo.create({
+      name: cleanName,
+      academic_year_id: academicYearId,
+      status: 'active',
+      teaching_model: defaultTeachingModel(cleanName),
+    });
     return this.pLevelRepo.save(pl);
+  }
+
+  /**
+   * Switch how a level organises teaching.
+   *
+   * Moving to specialist clears auto-generated "class teacher takes everything"
+   * rows so subject teachers can be assigned. Moving to class_teacher rebuilds
+   * those rows for every class that already has a class teacher.
+   */
+  async updatePLevelTeachingModel(id: number, teachingModel: TeachingModel) {
+    const pl = await this.pLevelRepo.findOne({ where: { id } });
+    if (!pl) throw new NotFoundException('P-Level not found');
+    if (pl.status !== 'active') throw new BadRequestException('That P-Level is not active');
+    if (teachingModel !== 'class_teacher' && teachingModel !== 'specialist') {
+      throw new BadRequestException('teaching_model must be class_teacher or specialist');
+    }
+    if (pl.teaching_model === teachingModel) return pl;
+
+    pl.teaching_model = teachingModel;
+    await this.pLevelRepo.save(pl);
+
+    const classes = await this.classRepo.find({ where: { p_level_id: id, status: 'active' } });
+    for (const cls of classes) {
+      await this.teachingService.syncClassTeacherAssignments(cls.id);
+    }
+    return pl;
   }
 
   async deletePLevel(id: number) {
@@ -704,6 +736,7 @@ export class AcademicsService {
           name: normName,
           academic_year_id: year.id,
           status: 'active',
+          teaching_model: defaultTeachingModel(normName),
         });
         pl = await this.pLevelRepo.save(pl);
       }

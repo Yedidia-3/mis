@@ -18,9 +18,9 @@ import { User } from './user.entity';
  * five periods whoever teaches it. A teacher's workload is therefore derived
  * — the sum of their subjects' periods — rather than typed in and left to rot.
  *
- * For P1–3, where one teacher takes every subject, these rows are generated
- * automatically when a class teacher is assigned. Only P4–6 specialists need
- * entering by hand.
+ * For nursery and P1–P2, where one teacher takes every subject, these rows are
+ * generated automatically when a class teacher is assigned. P3–P6 specialists
+ * are entered by hand on Teacher Assignments.
  */
 @Entity('teaching_assignments')
 // One subject in one class has exactly one teacher. Without this, two teachers

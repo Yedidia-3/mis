@@ -18,6 +18,7 @@ interface PLevel {
   id: number;
   name: string;
   academic_year_id: number;
+  teaching_model?: "class_teacher" | "specialist";
   classes: { id: number; students?: any[]; student_count?: number; pending_imported_count?: number }[];
   class_count?: number;
   student_count?: number;
@@ -93,6 +94,25 @@ export function PLevelManagement() {
     }
   };
 
+  const setTeachingModel = async (pl: PLevel, teaching_model: "class_teacher" | "specialist") => {
+    if (pl.teaching_model === teaching_model) return;
+    setSaving(true);
+    try {
+      await api.put(`/api/v1/academics/p-levels/${pl.id}/teaching-model`, { teaching_model });
+      toast.success(
+        teaching_model === "specialist"
+          ? `${pl.name} is now a specialist level — assign subject teachers on Teacher Assignments`
+          : `${pl.name} is now a class-teacher level — one teacher covers every subject`,
+      );
+      await load();
+    } catch (err: any) {
+      toast.error(err.message ?? "Could not update the teaching model");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+
   if (loading) return (
     <div className="flex justify-center py-20">
       <Loader2 className="animate-spin" size={36} style={{ color: "var(--navy-blue)" }} />
@@ -158,6 +178,15 @@ export function PLevelManagement() {
                           style={{ backgroundColor: status.bg, color: status.color }}>
                           {status.label}
                         </span>
+                        <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold"
+                          style={{
+                            backgroundColor: pl.teaching_model === "specialist"
+                              ? "color-mix(in srgb, var(--navy-blue) 12%, white)"
+                              : "color-mix(in srgb, var(--success-green) 12%, white)",
+                            color: pl.teaching_model === "specialist" ? "var(--navy-blue)" : "var(--success-green)",
+                          }}>
+                          {pl.teaching_model === "specialist" ? "Specialist (P3–P6 style)" : "Class teacher"}
+                        </span>
                         {Number(pl.pending_imported_count || 0) > 0 && (
                           <span
                             className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold shadow-xs cursor-pointer animate-pulse"
@@ -181,6 +210,15 @@ export function PLevelManagement() {
                             <DropdownMenuItem onClick={() => navigate(`/dean/import?pLevel=${pl.id}`)}>
                               Import Students
                             </DropdownMenuItem>
+                            {pl.teaching_model !== "specialist" ? (
+                              <DropdownMenuItem onClick={() => setTeachingModel(pl, "specialist")}>
+                                Use specialist teachers (P3–P6 style)
+                              </DropdownMenuItem>
+                            ) : (
+                              <DropdownMenuItem onClick={() => setTeachingModel(pl, "class_teacher")}>
+                                Use one class teacher for all subjects
+                              </DropdownMenuItem>
+                            )}
                             <DropdownMenuItem className="text-red-600 focus:text-red-600 focus:bg-red-50"
                               onClick={() => { setSelectedPLevel(pl); setShowDeleteDialog(true); }}>
                               Delete P-Level
@@ -229,11 +267,13 @@ export function PLevelManagement() {
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Add New P-Level</DialogTitle>
-            <DialogDescription>For academic year {activeYear.name}</DialogDescription>
+            <DialogDescription>
+              For academic year {activeYear.name}. P3–P6 open as specialist levels (several subject teachers per class); nursery and P1–P2 keep one class teacher.
+            </DialogDescription>
           </DialogHeader>
           <div className="py-4">
             <Label>P-Level Name</Label>
-            <Input className="mt-2 h-11" placeholder="e.g. P6" value={newPLevelName}
+            <Input className="mt-2 h-11" placeholder="e.g. P3" value={newPLevelName}
               onChange={e => setNewPLevelName(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && handleAdd()} />
           </div>
