@@ -310,19 +310,42 @@ export class AssessmentsService {
   }
 
   async createSubject(dto: CreateSubjectDto) {
+    const pl = await this.classRepo.query(`SELECT id FROM p_levels WHERE id = $1 AND status = 'active'`, [dto.p_level_id]);
+    if (!pl.length) throw new NotFoundException('P-Level not found');
+    const code = dto.code.trim().toUpperCase();
+    const name = dto.name.replace(/\s+/g, ' ').trim();
     const clash = await this.subjectRepo.findOne({
-      where: { p_level_id: dto.p_level_id, code: dto.code },
+      where: { p_level_id: dto.p_level_id, code },
     });
     if (clash) {
-      throw new BadRequestException(`Subject code ${dto.code} already exists at this level`);
+      throw new BadRequestException(`Subject code ${code} already exists at this level`);
     }
-    return this.subjectRepo.save(this.subjectRepo.create(dto));
+    // Periods stay on the row for timetable/report math, but the Courses UI
+    // no longer asks for them — default until the dean brings credits back.
+    return this.subjectRepo.save(this.subjectRepo.create({
+      p_level_id: dto.p_level_id,
+      name,
+      code,
+      display_order: dto.display_order ?? 0,
+      periods_per_week: 5,
+      min_consecutive: 1,
+    }));
   }
 
   async updateSubject(id: number, dto: UpdateSubjectDto) {
     const subject = await this.subjectRepo.findOne({ where: { id } });
     if (!subject) throw new NotFoundException('Subject not found');
-    Object.assign(subject, dto);
+    if (dto.name !== undefined) subject.name = dto.name.replace(/\s+/g, ' ').trim();
+    if (dto.code !== undefined) {
+      const code = dto.code.trim().toUpperCase();
+      const clash = await this.subjectRepo.findOne({ where: { p_level_id: subject.p_level_id, code } });
+      if (clash && clash.id !== id) {
+        throw new BadRequestException(`Subject code ${code} already exists at this level`);
+      }
+      subject.code = code;
+    }
+    if (dto.display_order !== undefined) subject.display_order = dto.display_order;
+    // Ignore periods_per_week / min_consecutive from clients while credits are paused.
     return this.subjectRepo.save(subject);
   }
 

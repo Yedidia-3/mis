@@ -98,7 +98,8 @@ export class AcademicsController {
   // Students
   @Get('students')
   @Roles('dean', 'principal', 'teacher', 'super_admin', 'accountant')
-  listStudents(
+  async listStudents(
+    @CurrentUser() user: User,
     @Query('academic_year_id') yearId?: string,
     @Query('p_level_id') pLevelId?: string,
     @Query('class_id') classId?: string,
@@ -107,7 +108,7 @@ export class AcademicsController {
     @Query('page') page?: string,
     @Query('limit') limit?: string,
   ) {
-    return this.academicsService.listStudents({
+    const params: Parameters<AcademicsService['listStudents']>[0] = {
       academicYearId: yearId ? +yearId : undefined,
       pLevelId: pLevelId ? +pLevelId : undefined,
       classId: classId ? +classId : undefined,
@@ -115,7 +116,11 @@ export class AcademicsController {
       status,
       page: page ? +page : undefined,
       limit: limit ? +limit : undefined,
-    });
+    };
+    if (user.role === 'teacher') {
+      params.restrictClassIds = await this.academicsService.teacherVisibleClassIds(user.id);
+    }
+    return this.academicsService.listStudents(params);
   }
 
   @Post('students/import')

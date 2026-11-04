@@ -36,7 +36,9 @@ import { AttendanceScreen } from "./screens/teacher/AttendanceScreen";
 import { MyClasses } from "./screens/teacher/MyClasses";
 import { MyClassStudentList } from "./screens/teacher/MyClassStudentList";
 import { TeacherDashboard } from "./screens/teacher/TeacherDashboard";
-import { CourseCatalogue } from "./screens/dean/CourseCatalogue";
+import { CoursesHome } from "./screens/dean/courses/CoursesHome";
+import { BandLevels } from "./screens/dean/courses/BandLevels";
+import { LevelCourses } from "./screens/dean/courses/LevelCourses";
 import { AcademicRecords } from "./screens/dean/records/AcademicRecords";
 import { AssessmentReview } from "./screens/dean/records/AssessmentReview";
 import { SectionTeachers } from "./screens/dean/records/SectionTeachers";
@@ -174,7 +176,15 @@ export const router = createBrowserRouter([
       },
       {
         path: "dean/courses",
-        Component: CourseCatalogue,
+        Component: CoursesHome,
+      },
+      {
+        path: "dean/courses/:section",
+        Component: BandLevels,
+      },
+      {
+        path: "dean/courses/:section/:pLevelId",
+        Component: LevelCourses,
       },
       {
         path: "dean/teaching",
