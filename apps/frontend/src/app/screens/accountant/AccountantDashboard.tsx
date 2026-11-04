@@ -164,7 +164,7 @@ export function AccountantDashboard() {
               <div className="flex-1">
                 <p className="font-semibold" style={{ color: "var(--dark-gray)" }}>Transport</p>
                 <p className="text-sm" style={{ color: "var(--mid-gray)" }}>
-                  {transport.filter(hasPaid).length} paid · {transport.length} enrolled
+                  {transport.filter(hasPaid).length} paid · {transport.flatMap(en => Object.values(en.payments ?? {})).filter(c => c?.kind === 'partial').length} partial · {transport.length} enrolled
                 </p>
               </div>
               <Button variant="ghost" size="sm" onClick={() => navigate("/accountant/enrollment/transport")}

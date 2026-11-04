@@ -8,7 +8,9 @@ import { Student } from '../entities/student.entity';
 import { BulkEnrollDto } from './enrollments/dto/bulk-enroll.dto';
 import { CreateEnrollmentDto } from './enrollments/dto/create-enrollment.dto';
 import { FeedingPrices, normalizeFeedingCell, roundMoney } from './feeding-payment';
+import { normalizeTransportCell } from './transport-payment';
 import { CreateZoneDto } from './zones/dto/create-zone.dto';
+
 
 @Injectable()
 export class AccountantService implements OnModuleInit {
@@ -262,16 +264,28 @@ export class AccountantService implements OnModuleInit {
 
   // Replace the monthly payment grid for one enrollment. Each cell value is an
   // object { paid_on, months, expires_on } so we can track expiry per payment.
-  // Feeding cells also carry full / partial money, loaded from the saved prices.
+  // Feeding and transport cells also carry full / partial money (meal prices
+  // or the student's zone price).
   async updatePayments(id: number, payments: Record<string, any>) {
     const e = await this.enrollmentRepo.findOne({ where: { id } });
     if (!e) throw new NotFoundException('Enrollment not found');
     const prices = e.type === 'feeding' ? await this.getFeedingPrices() : null;
+    let zonePrice: number | null = null;
+    if (e.type === 'transport') {
+      if (!e.zone_id) {
+        throw new BadRequestException('Assign a zone before recording a payment.');
+      }
+      const zone = await this.zoneRepo.findOne({ where: { id: e.zone_id } });
+      if (!zone) throw new BadRequestException('Assign a zone before recording a payment.');
+      zonePrice = Number(zone.price) || 0;
+    }
     const clean: Record<string, any> = {};
     for (const [k, v] of Object.entries(payments ?? {})) {
       if (!v) continue;
       if (e.type === 'feeding' && /^[1-4][BL]$/.test(k)) {
         clean[k] = normalizeFeedingCell(k, v, prices!);
+      } else if (e.type === 'transport' && /^[1-4]$/.test(k)) {
+        clean[k] = normalizeTransportCell(v, zonePrice);
       } else if (typeof v === 'object' && v.paid_on) {
         clean[k] = { paid_on: v.paid_on, months: v.months ?? 1, expires_on: v.expires_on };
       } else {

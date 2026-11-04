@@ -16,7 +16,16 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from ".
 
 interface Zone { id: number; name: string; price: number; }
 
-interface PaymentCell { paid_on: string; months: number; expires_on: string; }
+interface PaymentCell {
+  paid_on: string;
+  months: number;
+  expires_on: string;
+  kind?: "full" | "partial";
+  unit_price?: number;
+  full_amount?: number;
+  amount_paid?: number;
+  balance?: number;
+}
 
 interface Enrollment {
   id: number;
@@ -44,6 +53,12 @@ function fmtLocal(dateStr: string): string {
   if (!dateStr) return '';
   const [y, m, d] = dateStr.split('-').map(Number);
   return new Date(y, m - 1, d).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+}
+function rwf(n: number): string {
+  return `RWF ${Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+}
+function roundMoney(n: number): number {
+  return Math.round((Number(n) + Number.EPSILON) * 100) / 100;
 }
 function cellState(cell?: PaymentCell): "none" | "active" | "soon" | "expired" {
   if (!cell) return "none";
@@ -85,6 +100,8 @@ export function TransportEnrollment() {
   const [payTarget, setPayTarget] = useState<{ e: Enrollment; key: string; label: string } | null>(null);
   const [payDate, setPayDate] = useState("");
   const [payMonths, setPayMonths] = useState<string>("1");
+  const [payKind, setPayKind] = useState<"full" | "partial">("full");
+  const [amountPaid, setAmountPaid] = useState("");
 
   const load = useCallback(async () => {
     try {
@@ -150,6 +167,10 @@ export function TransportEnrollment() {
   const soonCutoff = new Date(); soonCutoff.setDate(today.getDate() + 5);
   const paymentCells = filtered.flatMap((e) => Object.values(e.payments ?? {}));
   const unpaidCount = filtered.filter((e) => Object.keys(e.payments ?? {}).length === 0).length;
+  const partialCount = paymentCells.filter((cell) => cell?.kind === "partial").length;
+  const partialLeft = paymentCells
+    .filter((cell) => cell?.kind === "partial")
+    .reduce((sum, cell) => sum + Number(cell.balance ?? 0), 0);
   const dueSoonCount = paymentCells.filter((cell) => {
     if (!cell?.expires_on) return false;
     const expiry = new Date(`${cell.expires_on}T00:00:00`);
@@ -160,6 +181,7 @@ export function TransportEnrollment() {
   const stats = [
     { label: 'Enrolled', value: filtered.length, note: 'students in view' },
     { label: 'Not Yet Paid', value: unpaidCount, note: 'no payment recorded' },
+    { label: 'Partial Payments', value: partialCount, note: partialLeft > 0 ? `${rwf(partialLeft)} still due` : 'none outstanding' },
     { label: 'Due in 5 Days', value: dueSoonCount, note: 'payment window closing' },
     { label: 'Expired', value: expiredCount, note: 'already due' },
   ];
@@ -168,7 +190,13 @@ export function TransportEnrollment() {
     setEnrollments(prev => prev.map(x => x.id === e.id ? { ...x, payments: next } : x));
     setSavingId(e.id);
     try {
-      await api.put(`/api/v1/accountant/enrollments/${e.id}/payments`, { payments: next });
+      const saved = await api.put<{ payments: Record<string, PaymentCell> }>(
+        `/api/v1/accountant/enrollments/${e.id}/payments`,
+        { payments: next },
+      );
+      if (saved?.payments) {
+        setEnrollments(prev => prev.map(x => x.id === e.id ? { ...x, payments: saved.payments } : x));
+      }
     } catch (err: any) {
       toast.error(err.message ?? 'Failed to update payment');
       load();
@@ -179,6 +207,11 @@ export function TransportEnrollment() {
 
   const onToggle = (e: Enrollment, month: number) => {
     if (!e.zone_id) { toast.error('Assign a zone before recording payment'); return; }
+    const unit = Number(zones.find(z => z.id === e.zone_id)?.price) || 0;
+    if (!(unit > 0)) {
+      toast.error('Set the zone price before recording a payment.');
+      return;
+    }
     const key = `${month}`;
     if (e.payments?.[key]) {
       const next = { ...e.payments };
@@ -188,13 +221,32 @@ export function TransportEnrollment() {
       setPayTarget({ e, key, label: `${e.student?.name ?? ''} · Month ${month} Transport` });
       setPayDate(new Date().toISOString().split('T')[0]);
       setPayMonths("1");
+      setPayKind("full");
+      setAmountPaid("");
     }
   };
 
+  const unitPrice = payTarget
+    ? (Number(zones.find(z => z.id === payTarget.e.zone_id)?.price) || 0)
+    : 0;
+  const fullAmount = roundMoney(unitPrice * (+payMonths || 1));
+  const paidNumber = roundMoney(Number(amountPaid));
+  const partialInvalid = payKind === "partial" && (!(paidNumber > 0) || paidNumber > fullAmount);
+  const balance = payKind === "partial" && paidNumber > 0 && paidNumber <= fullAmount
+    ? roundMoney(fullAmount - paidNumber)
+    : 0;
+
   const confirmPayment = () => {
-    if (!payTarget || !payDate) return;
+    if (!payTarget || !payDate || partialInvalid || !(unitPrice > 0)) return;
     const months = +payMonths;
-    const cell: PaymentCell = { paid_on: payDate, months, expires_on: addMonths(payDate, months) };
+    // Omit the price snapshot so the server loads the saved zone price.
+    const cell: PaymentCell = {
+      paid_on: payDate,
+      months,
+      expires_on: addMonths(payDate, months),
+      kind: payKind,
+      ...(payKind === "partial" ? { amount_paid: paidNumber } : {}),
+    };
     const next = { ...(payTarget.e.payments ?? {}), [payTarget.key]: cell };
     savePayments(payTarget.e, next);
     setPayTarget(null);
@@ -252,7 +304,13 @@ export function TransportEnrollment() {
   const handleExport = () => {
     const header = "Name,Class,Zone," + MONTHS.map(m => `M${m}`).join(",") + "\n";
     const rows = filtered.map(e => {
-      const cells = MONTHS.map(m => e.payments?.[`${m}`]?.expires_on ? `exp ${e.payments[`${m}`].expires_on}` : "");
+      const describe = (cell?: PaymentCell) => {
+        if (!cell?.expires_on) return "";
+        if (cell.kind === "partial") return `partial paid ${cell.amount_paid ?? ""} left ${cell.balance ?? ""} exp ${cell.expires_on}`;
+        if (cell.kind === "full") return `full ${cell.full_amount ?? ""} exp ${cell.expires_on}`;
+        return `exp ${cell.expires_on}`;
+      };
+      const cells = MONTHS.map(m => describe(e.payments?.[`${m}`]));
       return `"${e.student?.name ?? ''}","${classLabel(e)}","${zoneName(e.zone_id) ?? ''}",${cells.map(c => `"${c}"`).join(",")}`;
     }).join("\n");
     const blob = new Blob([header + rows], { type: 'text/csv' });
@@ -272,7 +330,7 @@ export function TransportEnrollment() {
           </Button>
           <h1 className="text-2xl font-semibold" style={{ color: "var(--dark-gray)" }}>Transport</h1>
           <p className="text-sm mt-1" style={{ color: "var(--mid-gray)" }}>
-            Students are grouped by transport zone. Select a zone, tick payments, or remove the students you choose.
+            Students are grouped by transport zone. Tick a month to record a full or partial payment from that zone's price.
           </p>
         </div>
         <div className="flex gap-2">
@@ -349,7 +407,7 @@ export function TransportEnrollment() {
         </div>
       ))}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4">
         {stats.map((stat) => (
           <Card key={stat.label} style={{ borderColor: "var(--border)" }}>
             <CardContent className="p-5">
@@ -461,16 +519,28 @@ export function TransportEnrollment() {
                       {MONTHS.map(m => {
                         const cell = e.payments?.[`${m}`];
                         const state = cellState(cell);
+                        const title = !cell
+                          ? (e.zone_id ? "Not paid" : "Assign a zone first")
+                          : cell.kind === "partial"
+                            ? `Partial · paid ${rwf(cell.amount_paid ?? 0)} · left ${rwf(cell.balance ?? 0)} · expires ${cell.expires_on}`
+                            : cell.kind === "full"
+                              ? `Full · ${rwf(cell.amount_paid ?? cell.full_amount ?? 0)} · expires ${cell.expires_on}`
+                              : `Paid ${cell.paid_on} · expires ${cell.expires_on}`;
                         return (
                           <TableCell key={m} className="text-center">
-                            <div className="flex flex-col items-center gap-0.5"
-                              title={cell ? `Paid ${cell.paid_on} · expires ${cell.expires_on}` : (e.zone_id ? 'Not paid' : 'Assign a zone first')}>
+                            <div className="flex flex-col items-center gap-0.5" title={title}>
                               <Checkbox
                                 checked={!!cell}
                                 disabled={!e.zone_id}
                                 onCheckedChange={() => onToggle(e, m)}
                               />
-                              {cell && (
+                              {cell?.kind === "partial" && (
+                                <span className="text-[10px] font-semibold leading-none" style={{ color: "var(--warning-amber)" }}>P</span>
+                              )}
+                              {cell?.kind === "full" && (
+                                <span className="text-[10px] font-semibold leading-none" style={{ color: STATE_COLOR[state] }}>F</span>
+                              )}
+                              {cell && !cell.kind && (
                                 <span className="w-1.5 h-1.5 rounded-full"
                                   style={{ backgroundColor: STATE_COLOR[state] }} />
                               )}
@@ -530,20 +600,67 @@ export function TransportEnrollment() {
                 </SelectContent>
               </Select>
             </div>
+            <div className="p-3 rounded-lg" style={{ backgroundColor: "var(--light-gray)" }}>
+              <p className="text-xs" style={{ color: "var(--mid-gray)" }}>
+                {payTarget ? (zoneName(payTarget.e.zone_id) ?? "Zone") : "Zone"} · {payMonths} month{payMonths === "1" ? "" : "s"}
+              </p>
+              <p className="text-lg font-semibold mt-1" style={{ color: "var(--dark-gray)" }}>{rwf(fullAmount)}</p>
+              <p className="text-xs mt-1" style={{ color: "var(--mid-gray)" }}>
+                {rwf(unitPrice)} × {payMonths}
+              </p>
+            </div>
+            <div>
+              <Label>Payment</Label>
+              <div className="grid grid-cols-2 gap-2 mt-2">
+                {(["full", "partial"] as const).map(kind => (
+                  <button key={kind} type="button" onClick={() => setPayKind(kind)}
+                    className="h-11 rounded-md border text-sm font-medium"
+                    style={{
+                      borderColor: payKind === kind ? "var(--maroon)" : "var(--border)",
+                      backgroundColor: payKind === kind ? "var(--maroon)" : "#FFFFFF",
+                      color: payKind === kind ? "#FFFFFF" : "var(--dark-gray)",
+                    }}>
+                    {kind === "full" ? "Full payment" : "Partial payment"}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {payKind === "partial" && (
+              <div>
+                <Label>Amount paid (RWF)</Label>
+                <Input type="number" min={1} max={fullAmount} step="1" inputMode="decimal"
+                  value={amountPaid} onChange={e => setAmountPaid(e.target.value)}
+                  placeholder={`Up to ${fullAmount}`} className="mt-2 h-11" />
+                {amountPaid !== "" && paidNumber > fullAmount && (
+                  <p className="text-sm mt-2" style={{ color: "var(--danger-red)" }}>
+                    Amount paid cannot exceed {rwf(fullAmount)}.
+                  </p>
+                )}
+                {paidNumber > 0 && paidNumber <= fullAmount && (
+                  <p className="text-sm mt-2" style={{ color: "var(--dark-gray)" }}>
+                    Left to pay: <strong>{rwf(balance)}</strong>
+                  </p>
+                )}
+              </div>
+            )}
             {payDate && (
               <div className="p-3 rounded-lg" style={{ backgroundColor: "#F0FDF4" }}>
                 <p className="text-sm" style={{ color: "var(--success-green)" }}>
                   Paid <strong>{fmtLocal(payDate)}</strong> → expires <strong>{fmtLocal(addMonths(payDate, +payMonths))}</strong>
                 </p>
                 <p className="text-xs mt-1" style={{ color: "#15803D" }}>
-                  You'll be reminded as this date approaches.
+                  {payKind === "full"
+                    ? `${rwf(fullAmount)} recorded in full.`
+                    : paidNumber > 0 && paidNumber <= fullAmount
+                      ? `${rwf(paidNumber)} received · ${rwf(balance)} left.`
+                      : "Enter the amount received."}
                 </p>
               </div>
             )}
           </div>
           <DialogFooter>
             <Button variant="ghost" onClick={() => setPayTarget(null)}>Cancel</Button>
-            <Button onClick={confirmPayment} disabled={!payDate}
+            <Button onClick={confirmPayment} disabled={!payDate || partialInvalid}
               style={{ backgroundColor: "var(--maroon)", color: "#FFFFFF" }}>
               Save Payment
             </Button>
