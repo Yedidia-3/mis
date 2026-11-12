@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import * as ExcelJS from 'exceljs';
+import { sheetCell } from './class-list-sheet';
 import {
   Document, Packer, Paragraph, Table, TableRow, TableCell,
   TextRun, WidthType, AlignmentType, BorderStyle, HeadingLevel,
@@ -8,7 +9,14 @@ import {
 export interface ClassExportData {
   className: string;
   pLevelName: string;
-  students: { name: string; rank?: number | null; marks_percentage?: number | null; former_class?: string | null }[];
+  headers?: string[] | null;
+  students: {
+    name: string;
+    rank?: number | null;
+    marks_percentage?: number | null;
+    former_class?: string | null;
+    sheet?: Record<string, string> | null;
+  }[];
 }
 
 @Injectable()
@@ -23,12 +31,12 @@ export class ExportService {
       const label = `${cls.pLevelName}${cls.className}`;
       const sheet = workbook.addWorksheet(label.substring(0, 31));
 
+      const headers = cls.headers?.length
+        ? cls.headers
+        : ['Student Name', 'Former Class', 'Rank', 'Marks %'];
       sheet.columns = [
         { header: 'No.', key: 'no', width: 6 },
-        { header: 'Student Name', key: 'name', width: 35 },
-        { header: 'Former Class', key: 'former_class', width: 14 },
-        { header: 'Rank', key: 'rank', width: 8 },
-        { header: 'Marks %', key: 'marks', width: 10 },
+        ...headers.map((header) => ({ header, key: header, width: Math.min(28, Math.max(12, header.length + 2)) })),
       ];
 
       const headerRow = sheet.getRow(1);
@@ -37,13 +45,9 @@ export class ExportService {
       headerRow.alignment = { vertical: 'middle', horizontal: 'center' };
 
       cls.students.forEach((s, i) => {
-        sheet.addRow({
-          no: i + 1,
-          name: s.name,
-          former_class: s.former_class ?? '',
-          rank: s.rank ?? '',
-          marks: s.marks_percentage != null ? s.marks_percentage : '',
-        });
+        const row: Record<string, string | number> = { no: i + 1 };
+        for (const header of headers) row[header] = sheetCell(s, header);
+        sheet.addRow(row);
       });
 
       sheet.addRow([]);
@@ -57,7 +61,10 @@ export class ExportService {
     const sections = classes.map((cls) => {
       const label = `${cls.pLevelName} ${cls.className}`;
 
-      const headerCells = ['No.', 'Student Name', 'Former Class', 'Rank', 'Marks %'].map(
+      const headers = cls.headers?.length
+        ? cls.headers
+        : ['Student Name', 'Former Class', 'Rank', 'Marks %'];
+      const headerCells = ['No.', ...headers].map(
         (text) => new TableCell({
           width: { size: text === 'Student Name' ? 40 : 15, type: WidthType.PERCENTAGE },
           shading: { color: 'auto', fill: '001F5B' },
@@ -69,13 +76,7 @@ export class ExportService {
       );
 
       const dataRows = cls.students.map((s, i) => {
-        const values = [
-          String(i + 1),
-          s.name,
-          s.former_class ?? '',
-          s.rank != null ? String(s.rank) : '',
-          s.marks_percentage != null ? `${s.marks_percentage}%` : '',
-        ];
+        const values = [String(i + 1), ...headers.map((header) => sheetCell(s, header))];
         return new TableRow({
           children: values.map((text, ci) => new TableCell({
             width: { size: ci === 1 ? 40 : 15, type: WidthType.PERCENTAGE },

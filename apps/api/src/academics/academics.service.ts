@@ -11,6 +11,7 @@ import { PLevel } from '../entities/p-level.entity';
 import { Student } from '../entities/student.entity';
 import { User } from '../entities/user.entity';
 import { NotificationsService } from '../notifications/notifications.service';
+import { normalizeName, parseClassListSheet } from './class-list-sheet';
 import { TeachingService } from './teaching/teaching.service';
 import { defaultTeachingModel, TeachingModel } from './teaching-model';
 
@@ -151,7 +152,7 @@ export class AcademicsService {
   async listClasses(pLevelId: number) {
     // Raw SQL — reliable student counts + teacher name + distribution status + pending imported count.
     const rows = await this.classRepo.query(
-      `SELECT c.id, c.name, c.p_level_id, c.teacher_id, c.status, c.distributed_at,
+      `SELECT c.id, c.name, c.p_level_id, c.teacher_id, c.status, c.distributed_at, c.list_headers,
               t.name AS teacher_name,
               (SELECT COUNT(*) FROM students s WHERE s.current_class_id = c.id) AS student_count,
               (SELECT COUNT(*) FROM students s WHERE s.current_class_id = c.id AND s.approval_status = 'pending') AS pending_imported_count
@@ -171,6 +172,7 @@ export class AcademicsService {
       teacher: c.teacher_id ? { id: c.teacher_id, name: c.teacher_name } : null,
       student_count: Number(c.student_count ?? 0),
       pending_imported_count: Number(c.pending_imported_count ?? 0),
+      list_headers: Array.isArray(c.list_headers) ? c.list_headers : [],
     }));
   }
 
@@ -1051,6 +1053,77 @@ export class AcademicsService {
     };
   }
 
+  /**
+   * Compare a class workbook with the students already on this class.
+   * Existing names are left untouched. Only names that are not already in the
+   * academic year are inserted. The class grid then uses this file's headers.
+   */
+  async importClassList(classId: number, fileBuffer: Buffer, dryRun: boolean, user?: User) {
+    const cls = await this.classRepo.findOne({ where: { id: classId, status: 'active' } });
+    if (!cls) throw new NotFoundException('Class not found');
+    const pLevel = await this.pLevelRepo.findOne({ where: { id: cls.p_level_id } });
+    if (!pLevel) throw new NotFoundException('P-Level not found');
+
+    const parsed = parseClassListSheet(fileBuffer);
+    const existing = await this.studentRepo.find({ where: { academic_year_id: pLevel.academic_year_id } });
+    const inClass = new Map<string, Student>();
+    const elsewhere = new Map<string, Student>();
+    for (const student of existing) {
+      const key = normalizeName(student.name);
+      if (!key) continue;
+      if (student.current_class_id === classId) inClass.set(key, student);
+      else if (!elsewhere.has(key)) elsewhere.set(key, student);
+    }
+
+    const toAdd: typeof parsed.rows = [];
+    const already: string[] = [];
+    const other: { name: string }[] = [];
+    for (const row of parsed.rows) {
+      const key = normalizeName(row.name);
+      if (inClass.has(key)) already.push(row.name);
+      else if (elsewhere.has(key)) other.push({ name: row.name });
+      else toAdd.push(row);
+    }
+
+    if (!dryRun) {
+      if (toAdd.length) {
+        const created = toAdd.map((row) => this.studentRepo.create({
+          name: row.name,
+          student_id_number: row.studentIdNumber ?? null,
+          academic_year_id: pLevel.academic_year_id,
+          current_class_id: classId,
+          former_class: row.formerClass ?? null,
+          rank: row.rank ?? null,
+          marks_percentage: row.marks ?? null,
+          sheet: row.cells,
+          status: 'active',
+          is_imported: true,
+          approval_status: 'approved',
+          imported_by_user_id: user?.id ?? null,
+          imported_at: new Date(),
+          approved_by_user_id: user?.id ?? null,
+          approved_at: new Date(),
+        }));
+        await this.studentRepo.save(created, { chunk: 100 });
+      }
+      cls.list_headers = parsed.headers;
+      await this.classRepo.save(cls);
+    }
+
+    return {
+      headers: parsed.headers,
+      new_count: toAdd.length,
+      already_in_class: already.length,
+      already_elsewhere: other.length,
+      new_students: toAdd.map((row) => ({ name: row.name })),
+      skipped: already,
+      elsewhere: other.map((row) => row.name),
+      message: dryRun
+        ? `${toAdd.length} new, ${already.length} already in this class, ${other.length} already in another class.`
+        : `Added ${toAdd.length} new student(s). ${already.length} already in this class were left unchanged.`,
+    };
+  }
+
   // ─── Excel Import ─────────────────────────────────────────────────────────────
   private parseMarks(raw: any): number | null {
     if (raw === null || raw === undefined) return null;
@@ -1190,36 +1263,41 @@ export class AcademicsService {
   }
 
   async getClassStudents(classId: number) {
+    const cls = await this.classRepo.findOne({ where: { id: classId } });
     const students = await this.studentRepo.find({
       where: { current_class_id: classId },
       relations: ['imported_by_user'],
       order: { rank: 'ASC', name: 'ASC' },
     });
-    return students.map((s) => ({
-      id: s.id,
-      student_id_number: s.student_id_number,
-      name: s.name,
-      academic_year_id: s.academic_year_id,
-      current_class_id: s.current_class_id,
-      former_class: s.former_class,
-      rank: s.rank,
-      marks_percentage: s.marks_percentage,
-      status: s.status,
-      is_imported: s.is_imported,
-      approval_status: s.approval_status,
-      imported_at: s.imported_at,
-      imported_by_user_id: s.imported_by_user_id,
-      imported_by: s.imported_by_user ? {
-        id: s.imported_by_user.id,
-        name: s.imported_by_user.name,
-        email: s.imported_by_user.email,
-        role: s.imported_by_user.role,
-      } : null,
-      approved_by_user_id: s.approved_by_user_id,
-      approved_at: s.approved_at,
-      created_at: s.created_at,
-      updated_at: s.updated_at,
-    }));
+    return {
+      list_headers: cls?.list_headers ?? [],
+      students: students.map((s) => ({
+        id: s.id,
+        student_id_number: s.student_id_number,
+        name: s.name,
+        academic_year_id: s.academic_year_id,
+        current_class_id: s.current_class_id,
+        former_class: s.former_class,
+        rank: s.rank,
+        marks_percentage: s.marks_percentage,
+        sheet: s.sheet ?? {},
+        status: s.status,
+        is_imported: s.is_imported,
+        approval_status: s.approval_status,
+        imported_at: s.imported_at,
+        imported_by_user_id: s.imported_by_user_id,
+        imported_by: s.imported_by_user ? {
+          id: s.imported_by_user.id,
+          name: s.imported_by_user.name,
+          email: s.imported_by_user.email,
+          role: s.imported_by_user.role,
+        } : null,
+        approved_by_user_id: s.approved_by_user_id,
+        approved_at: s.approved_at,
+        created_at: s.created_at,
+        updated_at: s.updated_at,
+      })),
+    };
   }
 
   private async checkAndUpdateClassDistributedStatus(classIds: number[]) {

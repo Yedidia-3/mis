@@ -34,6 +34,10 @@ export class Student {
   @Column({ type: 'decimal', precision: 5, scale: 2, nullable: true })
   marks_percentage: number;
 
+  // Cells from the class-list workbook, keyed by that file's column headers.
+  @Column({ type: 'jsonb', default: () => "'{}'" })
+  sheet: Record<string, string>;
+
   @Column({ type: 'enum', enum: ['active', 'repeating', 'promoted', 'transferred'], default: 'active' })
   status: 'active' | 'repeating' | 'promoted' | 'transferred';
 

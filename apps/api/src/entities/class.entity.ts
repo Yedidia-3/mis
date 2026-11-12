@@ -27,6 +27,10 @@ export class Class {
   @Column({ type: 'timestamp', nullable: true })
   distributed_at: Date;
 
+  // Column headers from the workbook last imported for this class.
+  @Column({ type: 'jsonb', nullable: true })
+  list_headers: string[] | null;
+
   @CreateDateColumn()
   created_at: Date;
 

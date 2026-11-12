@@ -218,6 +218,19 @@ export class AcademicsController {
     return this.academicsService.addStudentsToClassForUser(+id, students ?? [], user);
   }
 
+  @Post('classes/:id/import-list')
+  @Roles('dean')
+  @UseInterceptors(FileInterceptor('file', { storage: memoryStorage() }))
+  importClassList(
+    @Param('id') id: string,
+    @UploadedFile() file: Express.Multer.File,
+    @Query('dry_run') dryRun: string | undefined,
+    @CurrentUser() user: User,
+  ) {
+    if (!file) throw new BadRequestException('No file uploaded');
+    return this.academicsService.importClassList(+id, file.buffer, dryRun === 'true', user);
+  }
+
   @Put('students/:id')
   @Roles('dean', 'principal', 'teacher', 'super_admin')
   updateStudent(
@@ -355,11 +368,12 @@ export class AcademicsController {
       throw new BadRequestException('format must be xlsx or docx');
     }
     const classInfo = await this.academicsService.getClassWithPLevelForUser(+id, user);
-    const students = await this.academicsService.getClassStudentsForUser(+id, user);
+    const roster = await this.academicsService.getClassStudentsForUser(+id, user);
     const data: ClassExportData = {
       className: classInfo.name,
       pLevelName: classInfo.pLevelName,
-      students,
+      headers: roster.list_headers,
+      students: roster.students,
     };
     const filename = `${data.pLevelName}${data.className}-class-list`;
     if (format === 'xlsx') {

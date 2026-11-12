@@ -25,7 +25,31 @@ interface ClassData {
   students?: any[];
   student_count?: number;
   pending_imported_count?: number;
+  list_headers?: string[];
   status: string;
+}
+
+const DEFAULT_LIST_HEADERS = ['Name', 'Former Class', 'Rank', 'Marks %'];
+
+function unwrapRoster(res: any): { students: any[]; list_headers: string[] } {
+  if (res && Array.isArray(res.students)) {
+    return { students: res.students, list_headers: Array.isArray(res.list_headers) ? res.list_headers : [] };
+  }
+  const students = Array.isArray(res) ? res : res?.data ?? [];
+  return { students, list_headers: [] };
+}
+
+function displayCell(student: any, header: string): string {
+  const stored = student?.sheet?.[header];
+  if (stored != null && stored !== '') return String(stored);
+  const key = header.toLowerCase();
+  if (key === 'name' || key === 'names' || key === 'student name') return student?.name ?? '';
+  if (key.includes('former')) return student?.former_class ?? '';
+  if (key === 'rank' || key.includes('position') || key === 'place') return student?.rank != null ? String(student.rank) : '';
+  if (key.includes('mark') || key === 'average' || key === 'moyenne') {
+    return student?.marks_percentage != null ? String(student.marks_percentage) : '';
+  }
+  return '';
 }
 
 interface PLevel {
@@ -69,6 +93,10 @@ export function ClassManagement() {
   const [targetClassId, setTargetClassId] = useState<string>("");
   const [classViewMode, setClassViewMode] = useState<'view' | 'update'>('view');
   const [studentEdits, setStudentEdits] = useState<Record<number, { name: string; former_class: string; rank: string; marks_percentage: string }>>({});
+  const [listHeaders, setListHeaders] = useState<string[]>([]);
+  const [importing, setImporting] = useState(false);
+  const [importPreview, setImportPreview] = useState<any | null>(null);
+  const [importFile, setImportFile] = useState<File | null>(null);
 
   const load = useCallback(async () => {
     if (!pLevelId) return;
@@ -148,9 +176,12 @@ export function ClassManagement() {
 
   const loadClassStudents = useCallback(async (classId: number) => {
     setStudentsLoading(true);
+    setListHeaders([]);
     try {
       const res = await api.get<any>(`/api/v1/academics/classes/${classId}/students`);
-      const nextStudents = Array.isArray(res) ? res : res.data ?? [];
+      const roster = unwrapRoster(res);
+      const nextStudents = roster.students;
+      setListHeaders(roster.list_headers);
       setClassStudents(nextStudents);
       setStudentEdits(
         Object.fromEntries(nextStudents.map((student) => [student.id, buildStudentEditState(student)])),
@@ -230,6 +261,45 @@ export function ClassManagement() {
       toast.error(err.message ?? 'Failed to add students');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const uploadClassList = async (file: File, dryRun: boolean) => {
+    if (!selectedClass) return null;
+    const form = new FormData();
+    form.append('file', file);
+    return api.upload<any>(
+      `/api/v1/academics/classes/${selectedClass.id}/import-list?dry_run=${dryRun ? 'true' : 'false'}`,
+      form,
+    );
+  };
+
+  const handleImportFile = async (file: File) => {
+    setImporting(true);
+    try {
+      const preview = await uploadClassList(file, true);
+      setImportFile(file);
+      setImportPreview(preview);
+    } catch (err: any) {
+      toast.error(err.message ?? 'Could not read that Excel file');
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const confirmImport = async () => {
+    if (!importFile || !selectedClass) return;
+    setImporting(true);
+    try {
+      const result = await uploadClassList(importFile, false);
+      toast.success(result?.message ?? 'Class list updated');
+      setImportPreview(null);
+      setImportFile(null);
+      await Promise.all([load(), loadClassStudents(selectedClass.id)]);
+    } catch (err: any) {
+      toast.error(err.message ?? 'Import failed');
+    } finally {
+      setImporting(false);
     }
   };
 
@@ -396,6 +466,38 @@ export function ClassManagement() {
                     Add Students
                   </Button>
                 </div>
+                <div
+                  className="mt-4 border-2 border-dashed rounded-lg p-6 text-center"
+                  style={{ borderColor: 'var(--navy-blue)', backgroundColor: '#FFFFFF' }}
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    const file = e.dataTransfer.files?.[0];
+                    if (file) handleImportFile(file);
+                  }}
+                >
+                  <input
+                    id="class-list-import"
+                    type="file"
+                    accept=".xls,.xlsx"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) handleImportFile(file);
+                      e.target.value = '';
+                    }}
+                  />
+                  <p className="text-sm font-medium" style={{ color: 'var(--dark-gray)' }}>
+                    Drop an Excel class list here, or{' '}
+                    <label htmlFor="class-list-import" className="underline cursor-pointer" style={{ color: 'var(--maroon)' }}>
+                      browse
+                    </label>
+                  </p>
+                  <p className="text-xs mt-1" style={{ color: 'var(--mid-gray)' }}>
+                    .xls or .xlsx. Names already in this class stay as they are. Only new names are added, and the columns switch to match the file.
+                  </p>
+                  {importing && <Loader2 className="mx-auto mt-3 animate-spin" size={18} style={{ color: 'var(--navy-blue)' }} />}
+                </div>
               </div>
             )}
 
@@ -448,22 +550,40 @@ export function ClassManagement() {
                     <TableHeader style={{ backgroundColor: 'var(--navy-blue)' }}>
                       <TableRow>
                         <TableHead className="text-white w-10">#</TableHead>
-                        <TableHead className="text-white">Name</TableHead>
-                        <TableHead className="text-white">Former Class</TableHead>
-                        <TableHead className="text-white">Rank</TableHead>
-                        <TableHead className="text-white">Marks %</TableHead>
+                        {(listHeaders.length ? listHeaders : DEFAULT_LIST_HEADERS).map((header) => (
+                          <TableHead key={header} className="text-white whitespace-nowrap">{header}</TableHead>
+                        ))}
                         {!isPrincipal && <TableHead className="text-white text-right">Action</TableHead>}
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {filteredStudents.length === 0 ? (
                         <TableRow>
-                          <TableCell colSpan={isPrincipal ? 5 : 6} className="text-center py-8" style={{ color: 'var(--mid-gray)' }}>
+                          <TableCell colSpan={(listHeaders.length ? listHeaders.length : DEFAULT_LIST_HEADERS.length) + (isPrincipal ? 1 : 2)} className="text-center py-8" style={{ color: 'var(--mid-gray)' }}>
                             No students in this class
                           </TableCell>
                         </TableRow>
                       ) : filteredStudents.map((student, index) => {
                         const draft = studentEdits[student.id] ?? buildStudentEditState(student);
+                        if (listHeaders.length) {
+                          return (
+                            <TableRow key={student.id} style={{ backgroundColor: index % 2 === 0 ? '#FFFFFF' : 'var(--light-gray)' }}>
+                              <TableCell className="text-sm" style={{ color: 'var(--mid-gray)' }}>{index + 1}</TableCell>
+                              {listHeaders.map((header) => (
+                                <TableCell key={header} className="text-sm whitespace-nowrap" style={{ color: 'var(--dark-gray)' }}>
+                                  {displayCell(student, header) || '—'}
+                                </TableCell>
+                              ))}
+                              {!isPrincipal && (
+                                <TableCell className="text-right">
+                                  <Button variant="ghost" size="sm" onClick={() => openMoveDialog(student)} style={{ color: 'var(--maroon)' }}>
+                                    <ArrowLeftRight size={16} className="mr-1" /> Move
+                                  </Button>
+                                </TableCell>
+                              )}
+                            </TableRow>
+                          );
+                        }
                         return (
                           <TableRow key={student.id} style={{ backgroundColor: index % 2 === 0 ? '#FFFFFF' : 'var(--light-gray)' }}>
                             <TableCell className="text-sm" style={{ color: 'var(--mid-gray)' }}>{index + 1}</TableCell>
@@ -813,6 +933,42 @@ export function ClassManagement() {
             <Button variant="ghost" onClick={() => setShowDeleteDialog(false)}>Cancel</Button>
             <Button onClick={handleDeleteClass} disabled={saving} style={{ backgroundColor: "var(--danger-red)", color: "#fff" }}>
               {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null} Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!importPreview} onOpenChange={(open) => { if (!open) { setImportPreview(null); setImportFile(null); } }}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Compare class list</DialogTitle>
+            <DialogDescription>
+              {importPreview?.message}
+              {importPreview?.headers?.length ? ` Columns: ${importPreview.headers.length}.` : ''}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 text-sm" style={{ color: 'var(--dark-gray)' }}>
+            <p><strong>{importPreview?.new_count ?? 0}</strong> new student{importPreview?.new_count === 1 ? '' : 's'} will be added.</p>
+            <p><strong>{importPreview?.already_in_class ?? 0}</strong> already in this class — left unchanged.</p>
+            {(importPreview?.already_elsewhere ?? 0) > 0 && (
+              <p><strong>{importPreview.already_elsewhere}</strong> already enrolled in another class — not added.</p>
+            )}
+            {!!importPreview?.new_students?.length && (
+              <div className="max-h-48 overflow-auto rounded border p-2" style={{ borderColor: 'var(--border)' }}>
+                {importPreview.new_students.slice(0, 30).map((student: { name: string }) => (
+                  <p key={student.name}>{student.name}</p>
+                ))}
+                {importPreview.new_students.length > 30 && (
+                  <p style={{ color: 'var(--mid-gray)' }}>and {importPreview.new_students.length - 30} more</p>
+                )}
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => { setImportPreview(null); setImportFile(null); }} disabled={importing}>Cancel</Button>
+            <Button onClick={confirmImport} disabled={importing} style={{ backgroundColor: 'var(--maroon)', color: '#fff' }}>
+              {importing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {importPreview?.new_count ? `Add ${importPreview.new_count} new` : 'Match these columns'}
             </Button>
           </DialogFooter>
         </DialogContent>

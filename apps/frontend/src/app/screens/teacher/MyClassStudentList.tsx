@@ -42,7 +42,7 @@ export function MyClassStudentList() {
     const load = async () => {
       try {
         const res = await api.get<any>(`/api/v1/academics/classes/${classId}/students`);
-        setStudents(Array.isArray(res) ? res : res.data ?? []);
+        setStudents(Array.isArray(res?.students) ? res.students : Array.isArray(res) ? res : res.data ?? []);
       } catch {
         toast.error('Failed to load students');
       } finally {
