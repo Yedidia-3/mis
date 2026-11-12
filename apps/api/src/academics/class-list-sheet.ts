@@ -1,5 +1,14 @@
 import { BadRequestException } from '@nestjs/common';
-import * as XLSX from 'xlsx';
+import type * as XLSXType from 'xlsx';
+
+function loadXlsx(): typeof XLSXType {
+  try {
+    // Required only while reading a workbook. A missing install must not stop the API from booting.
+    return require('xlsx') as typeof XLSXType;
+  } catch {
+    throw new BadRequestException('Excel import is unavailable until the spreadsheet package is installed on the server.');
+  }
+}
 
 export interface ParsedClassRow {
   name: string;
@@ -33,6 +42,7 @@ function isNameHeader(value: string): boolean {
 
 /** Read the first worksheet that contains a name column. */
 export function parseClassListSheet(buffer: Buffer): ParsedClassSheet {
+  const XLSX = loadXlsx();
   const workbook = XLSX.read(buffer, { type: 'buffer', cellDates: false });
   if (!workbook.SheetNames.length) {
     throw new BadRequestException('No sheets found in the uploaded file');

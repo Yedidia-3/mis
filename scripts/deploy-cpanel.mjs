@@ -17,10 +17,15 @@ import SftpClient from 'ssh2-sftp-client';
 
 const root = process.env.REPO_ROOT || join(fileURLToPath(new URL('.', import.meta.url)), '..');
 const apiDist = join(root, 'apps/api/dist');
+const apiModules = join(root, 'apps/api/node_modules');
 const webDist = join(root, 'apps/frontend/dist');
 const home = '/home/jerichoschoolac';
 const apiRemote = `${home}/api.jerichoschool.ac.rw/dist`;
+const modulesRemote = `${home}/api.jerichoschool.ac.rw/node_modules`;
 const webRemote = `${home}/mis.jerichoschool.ac.rw`;
+// The class-list importer reads .xls workbooks. These packages are not already
+// on the server, and a missing require at boot takes the whole API down.
+const sheetPackages = ['xlsx', 'adler-32', 'cfb', 'crc-32', 'codepage', 'ssf', 'frac', 'wmf', 'word'];
 
 function privateKey() {
   const raw = process.env.CPANEL_SSH_KEY ?? '';
@@ -61,6 +66,9 @@ await sftp.connect({
 
 try {
   await uploadTree(sftp, apiDist, apiRemote);
+  for (const name of sheetPackages) {
+    await uploadTree(sftp, join(apiModules, name), `${modulesRemote}/${name}`);
+  }
   await sftp.fastPut(join(webDist, 'index.html'), `${webRemote}/index.html`);
   await uploadTree(sftp, join(webDist, 'assets'), `${webRemote}/assets`);
   await sftp.put(
