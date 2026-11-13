@@ -71,11 +71,34 @@ try {
   }
   await sftp.fastPut(join(webDist, 'index.html'), `${webRemote}/index.html`);
   await uploadTree(sftp, join(webDist, 'assets'), `${webRemote}/assets`);
+  const roster = (process.env.STAFF_ROSTER ?? '').trim();
+  if (roster.startsWith('[')) {
+    await sftp.put(Buffer.from(roster), `${home}/api.jerichoschool.ac.rw/staff-roster.json`);
+    console.log('Uploaded staff roster');
+  }
   await sftp.put(
     Buffer.from(`${new Date().toISOString()}\n`),
     `${home}/api.jerichoschool.ac.rw/tmp/restart.txt`,
   );
   console.log('Uploaded API dist, frontend, and restart.txt');
+  const statusRemote = `${home}/api.jerichoschool.ac.rw/staff-roster-status.txt`;
+  if (roster.startsWith('[')) {
+    try { await sftp.delete(statusRemote); } catch { /* no previous status */ }
+    const deadline = Date.now() + 90000;
+    while (Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 5000));
+      try {
+        const buf = await sftp.get(statusRemote);
+        const text = buf.toString().trim();
+        if (/^created=\d+ updated=\d+ skipped=\d+$/.test(text)) {
+          console.log(text);
+          break;
+        }
+      } catch {
+        // The API deletes the roster and writes this file after it boots.
+      }
+    }
+  }
 } finally {
   await sftp.end();
 }

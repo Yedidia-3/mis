@@ -6,6 +6,7 @@ describe('phone', () => {
     expect(canonicalPhone('+250788123456')).toBe('0788123456');
     expect(canonicalPhone('250788123456')).toBe('0788123456');
     expect(phoneLookupKeys('0788123456').sort()).toEqual(['+250788123456', '0788123456', '250788123456'].sort());
+    expect(canonicalPhone('788123456')).toBe('0788123456');
   });
 
   it('rejects a value that is too short', () => {

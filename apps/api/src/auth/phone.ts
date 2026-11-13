@@ -3,6 +3,8 @@ export function canonicalPhone(raw: string): string | null {
   const digits = String(raw ?? '').replace(/\D/g, '');
   if (digits.startsWith('250') && digits.length === 12) return `0${digits.slice(3)}`;
   if (digits.startsWith('0') && digits.length === 10) return digits;
+  // A 9-digit number starting with 7 is a Rwanda mobile missing the leading 0.
+  if (digits.startsWith('7') && digits.length === 9) return `0${digits}`;
   if (digits.length >= 9 && digits.length <= 15) return digits;
   return null;
 }

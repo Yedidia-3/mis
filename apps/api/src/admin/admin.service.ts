@@ -1,6 +1,8 @@
 import { BadRequestException, Injectable, Logger, NotFoundException, OnApplicationBootstrap } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import * as bcrypt from 'bcrypt';
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'fs';
+import { join } from 'path';
 import { Repository } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
 import { AcademicYear } from '../entities/academic-year.entity';
@@ -27,6 +29,7 @@ export class AdminService implements OnApplicationBootstrap {
   // so a fresh deployment can be logged into without shell access.
   async onApplicationBootstrap() {
     const count = await this.userRepo.count();
+    await this.importStaffRosterIfPresent();
     if (count > 0) return;
     const email = 'admin@jericho.rw';
     const password = 'Admin@Jericho2025!';
@@ -41,6 +44,77 @@ export class AdminService implements OnApplicationBootstrap {
       }),
     );
     this.logger.log(`Seeded initial Super Admin → ${email} / ${password} (must change on first login)`);
+  }
+
+  // One-shot import. The deploy uploads staff-roster.json, this applies it, then deletes it.
+  // The file is never kept in git. Counts only are written beside it for the deploy log.
+  private async importStaffRosterIfPresent() {
+    const file = [
+      join(process.cwd(), 'staff-roster.json'),
+      '/home/jerichoschoolac/api.jerichoschool.ac.rw/staff-roster.json',
+    ].find((path) => existsSync(path));
+    if (!file) return;
+
+    const statusPath = file.replace(/\.json$/, '-status.txt');
+    let created = 0;
+    let updated = 0;
+    let skipped = 0;
+    try {
+      const rows = JSON.parse(readFileSync(file, 'utf8'));
+      if (!Array.isArray(rows)) throw new Error('roster is not a list');
+      for (const row of rows) {
+        try {
+          const applied = await this.applyStaffRow(row);
+          if (applied === 'created') created += 1;
+          else if (applied === 'updated') updated += 1;
+          else skipped += 1;
+        } catch {
+          skipped += 1;
+        }
+      }
+    } catch {
+      skipped += 1;
+      this.logger.error('Staff roster file could not be applied');
+    } finally {
+      try { unlinkSync(file); } catch { /* already gone */ }
+      try { writeFileSync(statusPath, `created=${created} updated=${updated} skipped=${skipped}\n`); } catch { /* ignore */ }
+      this.logger.log(`Staff roster applied: created=${created} updated=${updated} skipped=${skipped}`);
+    }
+  }
+
+  private async applyStaffRow(row: any): Promise<'created' | 'updated' | 'skipped'> {
+    const phone = canonicalPhone(String(row?.phone ?? ''));
+    const email = String(row?.email ?? '').trim().toLowerCase();
+    const name = String(row?.name ?? '').trim();
+    const role = String(row?.role ?? '');
+    const passwordHash = String(row?.password_hash ?? '');
+    const roles = ['dean', 'principal', 'teacher', 'accountant'];
+    if (!phone || !email || !name || !roles.includes(role)) return 'skipped';
+
+    const byEmail = await this.userRepo
+      .createQueryBuilder('u')
+      .where('LOWER(u.email) = :email', { email })
+      .getOne();
+    const byPhone = byEmail ? null : await this.userRepo.findOne({ where: { phone } });
+    const user = byEmail ?? byPhone;
+    if (user) {
+      user.phone = phone;
+      if (user.role !== 'super_admin') user.role = role as any;
+      if (name) user.name = name;
+      await this.userRepo.save(user);
+      return 'updated';
+    }
+    if (!passwordHash.startsWith('$2')) return 'skipped';
+    await this.userRepo.save(this.userRepo.create({
+      name,
+      email,
+      phone,
+      role: role as any,
+      password: passwordHash,
+      must_change_password: true,
+      status: 'active',
+    }));
+    return 'created';
   }
 
   async listUsers() {
