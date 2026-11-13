@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Plus, MoreVertical, Users, BookOpen, Loader2 } from "lucide-react";
+import { Plus, MoreVertical, Users, BookOpen, Loader2, Upload } from "lucide-react";
 import { Card, CardContent } from "../../components/ui/card";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
@@ -41,6 +41,10 @@ export function PLevelManagement() {
   const [selectedPLevel, setSelectedPLevel] = useState<PLevel | null>(null);
   const [newPLevelName, setNewPLevelName] = useState("");
   const [saving, setSaving] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [importFiles, setImportFiles] = useState<File[]>([]);
+  const [importPreview, setImportPreview] = useState<any | null>(null);
+  const [importOutcome, setImportOutcome] = useState<any | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -113,6 +117,44 @@ export function PLevelManagement() {
   };
 
 
+  const uploadClassLists = async (files: File[], dryRun: boolean) => {
+    const form = new FormData();
+    files.forEach((file) => form.append('files', file));
+    return api.upload<any>(`/api/v1/academics/class-lists/import?dry_run=${dryRun ? 'true' : 'false'}`, form);
+  };
+
+  const handleClassListFiles = async (files: File[]) => {
+    const chosen = files.filter((file) => /\.xls[x]?$/i.test(file.name));
+    if (!chosen.length) return;
+    setImporting(true);
+    try {
+      const preview = await uploadClassLists(chosen, true);
+      setImportFiles(chosen);
+      setImportPreview(preview);
+    } catch (err: any) {
+      toast.error(err.message ?? 'Could not read those class lists');
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const confirmClassLists = async () => {
+    if (!importFiles.length) return;
+    setImporting(true);
+    try {
+      const result = await uploadClassLists(importFiles, false);
+      setImportPreview(null);
+      setImportFiles([]);
+      setImportOutcome(result);
+      await load();
+    } catch (err: any) {
+      setImportPreview(null);
+      setImportOutcome({ message: err.message ?? 'Import failed', results: [] });
+    } finally {
+      setImporting(false);
+    }
+  };
+
   if (loading) return (
     <div className="flex justify-center py-20">
       <Loader2 className="animate-spin" size={36} style={{ color: "var(--navy-blue)" }} />
@@ -142,6 +184,44 @@ export function PLevelManagement() {
           </Button>
         )}
       </div>
+
+      {!isPrincipal && pLevels.length > 0 && (
+        <div
+          className="rounded-xl border-2 border-dashed p-5"
+          style={{ borderColor: 'var(--navy-blue)', backgroundColor: '#fff' }}
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={(e) => {
+            e.preventDefault();
+            void handleClassListFiles(Array.from(e.dataTransfer.files ?? []));
+          }}
+        >
+          <input
+            id="all-class-lists"
+            type="file"
+            accept=".xls,.xlsx"
+            multiple
+            className="hidden"
+            onChange={(e) => {
+              void handleClassListFiles(Array.from(e.target.files ?? []));
+              e.target.value = '';
+            }}
+          />
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="font-semibold" style={{ color: 'var(--dark-gray)' }}>Update all class lists</p>
+              <p className="text-sm mt-1" style={{ color: 'var(--mid-gray)' }}>
+                Drop every class Excel file at once. Each file is matched by its Class line, such as P1-A or P4D. The list columns become the columns in the file.
+              </p>
+            </div>
+            <Button asChild style={{ backgroundColor: 'var(--maroon)', color: '#fff' }}>
+              <label htmlFor="all-class-lists" className="cursor-pointer">
+                <Upload size={16} className="mr-2" /> Choose files
+              </label>
+            </Button>
+          </div>
+          {importing && <Loader2 className="mt-3 animate-spin" size={18} style={{ color: 'var(--navy-blue)' }} />}
+        </div>
+      )}
 
       {pLevels.length === 0 ? (
         <div className="rounded-2xl border border-black/[0.06] bg-card/60 p-12 text-center shadow-xs">
@@ -283,6 +363,58 @@ export function PLevelManagement() {
               style={{ backgroundColor: "var(--maroon)", color: "#fff" }}>
               {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null} Add
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!importPreview} onOpenChange={(open) => { if (!open) { setImportPreview(null); setImportFiles([]); } }}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Update these class lists</DialogTitle>
+            <DialogDescription>{importPreview?.message}</DialogDescription>
+          </DialogHeader>
+          <div className="max-h-80 overflow-auto space-y-3 text-sm" style={{ color: 'var(--dark-gray)' }}>
+            {(importPreview?.results ?? []).map((item: any) => (
+              <div key={item.file} className="rounded border p-3" style={{ borderColor: 'var(--border)' }}>
+                <p className="font-medium">{item.class_label || item.file}</p>
+                <p style={{ color: item.error ? 'var(--danger-red)' : 'var(--mid-gray)' }}>
+                  {item.error || item.message}
+                </p>
+              </div>
+            ))}
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => { setImportPreview(null); setImportFiles([]); }} disabled={importing}>Cancel</Button>
+            <Button onClick={confirmClassLists} disabled={importing || !(importPreview?.results ?? []).some((item: any) => !item.error)} style={{ backgroundColor: 'var(--maroon)', color: '#fff' }}>
+              {importing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Update class lists
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!importOutcome} onOpenChange={(open) => { if (!open) setImportOutcome(null); }}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Class lists updated</DialogTitle>
+            <DialogDescription>{importOutcome?.message}</DialogDescription>
+          </DialogHeader>
+          <div className="max-h-80 overflow-auto space-y-3 text-sm" style={{ color: 'var(--dark-gray)' }}>
+            {(importOutcome?.results ?? []).map((item: any) => (
+              <div key={`${item.file}-${item.class_label ?? ''}`} className="rounded border p-3" style={{ borderColor: 'var(--border)' }}>
+                <p className="font-medium">{item.class_label || item.file}</p>
+                <p style={{ color: item.error ? 'var(--danger-red)' : 'var(--dark-gray)' }}>{item.error || item.message}</p>
+                {!item.error && (
+                  <p style={{ color: 'var(--mid-gray)' }}>
+                    {item.new_count ?? 0} added, {item.already_in_class ?? 0} already in the class, {item.already_elsewhere ?? 0} already in another class.
+                    {item.headers?.length ? ` Columns: ${item.headers.join(', ')}.` : ''}
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+          <DialogFooter>
+            <Button onClick={() => setImportOutcome(null)} style={{ backgroundColor: 'var(--maroon)', color: '#fff' }}>Back to P-Levels</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

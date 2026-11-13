@@ -463,7 +463,7 @@ export function ClassManagement() {
               <div ref={importPanelRef} className="rounded-lg border p-4" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--light-gray)' }}>
                 <p className="text-base font-semibold" style={{ color: 'var(--dark-gray)' }}>Import Students</p>
                 <p className="text-sm mt-1 mb-3" style={{ color: 'var(--mid-gray)' }}>
-                  Drop this class’s Excel file. Students already on the list stay as they are. Only new names are added.
+                  Drop this class’s Excel file. New names are added, and the columns switch to the columns in the file. Names already here keep their place and receive the file’s details.
                 </p>
                 <div
                   className="border-2 border-dashed rounded-lg p-6 text-center"

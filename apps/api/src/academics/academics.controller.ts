@@ -1,8 +1,8 @@
 import {
     BadRequestException, Body, Controller, Delete, Get, Param, Post, Put,
-    Query, Res, UploadedFile, UseGuards, UseInterceptors,
+    Query, Res, UploadedFile, UploadedFiles, UseGuards, UseInterceptors,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
+import { FileInterceptor, FilesInterceptor } from '@nestjs/platform-express';
 import { Response } from 'express';
 import { memoryStorage } from 'multer';
 import { CurrentUser } from '../auth/current-user.decorator';
@@ -216,6 +216,21 @@ export class AcademicsController {
     @CurrentUser() user: User,
   ) {
     return this.academicsService.addStudentsToClassForUser(+id, students ?? [], user);
+  }
+
+  @Post('class-lists/import')
+  @Roles('dean')
+  @UseInterceptors(FilesInterceptor('files', 40, { storage: memoryStorage() }))
+  importClassLists(
+    @UploadedFiles() files: Express.Multer.File[],
+    @Query('dry_run') dryRun: string | undefined,
+    @CurrentUser() user: User,
+  ) {
+    return this.academicsService.importClassLists(
+      (files ?? []).map((file) => ({ originalname: file.originalname, buffer: file.buffer })),
+      dryRun === 'true',
+      user,
+    );
   }
 
   @Post('classes/:id/import-list')

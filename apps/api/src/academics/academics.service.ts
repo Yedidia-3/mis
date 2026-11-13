@@ -11,7 +11,7 @@ import { PLevel } from '../entities/p-level.entity';
 import { Student } from '../entities/student.entity';
 import { User } from '../entities/user.entity';
 import { NotificationsService } from '../notifications/notifications.service';
-import { normalizeName, parseClassListSheet } from './class-list-sheet';
+import { classCodeFromLabel, normalizeName, parseClassListSheet } from './class-list-sheet';
 import { TeachingService } from './teaching/teaching.service';
 import { defaultTeachingModel, TeachingModel } from './teaching-model';
 
@@ -1055,8 +1055,9 @@ export class AcademicsService {
 
   /**
    * Compare a class workbook with the students already on this class.
-   * Existing names are left untouched. Only names that are not already in the
-   * academic year are inserted. The class grid then uses this file's headers.
+   * Names already in this class stay, and their row is filled from the file.
+   * Only names that are not already in the academic year are inserted.
+   * The class grid then uses this file's headers.
    */
   async importClassList(classId: number, fileBuffer: Buffer, dryRun: boolean, user?: User) {
     const cls = await this.classRepo.findOne({ where: { id: classId, status: 'active' } });
@@ -1076,16 +1077,24 @@ export class AcademicsService {
     }
 
     const toAdd: typeof parsed.rows = [];
-    const already: string[] = [];
+    const already: { student: Student; row: (typeof parsed.rows)[number] }[] = [];
     const other: { name: string }[] = [];
     for (const row of parsed.rows) {
       const key = normalizeName(row.name);
-      if (inClass.has(key)) already.push(row.name);
+      const current = inClass.get(key);
+      if (current) already.push({ student: current, row });
       else if (elsewhere.has(key)) other.push({ name: row.name });
       else toAdd.push(row);
     }
 
     if (!dryRun) {
+      if (already.length) {
+        for (const item of already) {
+          item.student.sheet = { ...(item.student.sheet ?? {}), ...item.row.cells };
+          if (item.row.studentIdNumber) item.student.student_id_number = item.row.studentIdNumber;
+        }
+        await this.studentRepo.save(already.map((item) => item.student), { chunk: 100 });
+      }
       if (toAdd.length) {
         const created = toAdd.map((row) => this.studentRepo.create({
           name: row.name,
@@ -1112,11 +1121,12 @@ export class AcademicsService {
 
     return {
       headers: parsed.headers,
+      class_label: parsed.classLabel,
       new_count: toAdd.length,
       already_in_class: already.length,
       already_elsewhere: other.length,
       new_students: toAdd.map((row) => ({ name: row.name })),
-      skipped: already,
+      skipped: already.map((item) => item.row.name),
       elsewhere: other.map((row) => row.name),
       message: dryRun
         ? `${toAdd.length} new, ${already.length} already in this class, ${other.length} already in another class.`
@@ -1124,13 +1134,105 @@ export class AcademicsService {
             toAdd.length
               ? `Added ${toAdd.length} new student${toAdd.length === 1 ? '' : 's'} to this class.`
               : 'No new students were added.',
-            `${already.length} already in this class ${already.length === 1 ? 'was' : 'were'} left unchanged.`,
+            already.length
+              ? `Filled in the file columns for ${already.length} student${already.length === 1 ? '' : 's'} already in this class.`
+              : 'Nobody already in this class needed a column update.',
             other.length
               ? `${other.length} already in another class ${other.length === 1 ? 'was' : 'were'} not added.`
               : 'Nobody was skipped for being in another class.',
             'The class list columns now match the file.',
           ].join(' '),
     };
+  }
+
+  async importClassLists(
+    files: { originalname: string; buffer: Buffer }[],
+    dryRun: boolean,
+    user?: User,
+  ) {
+    if (!files.length) throw new BadRequestException('Choose at least one class list.');
+    const year = await this.yearRepo.findOne({ where: { status: 'active' }, order: { created_at: 'DESC' } });
+    if (!year) throw new BadRequestException('No active academic year.');
+    const levels = await this.pLevelRepo.find({ where: { academic_year_id: year.id, status: 'active' } });
+    const results: any[] = [];
+
+    for (const file of files) {
+      let parsed: ReturnType<typeof parseClassListSheet>;
+      try {
+        parsed = parseClassListSheet(file.buffer);
+      } catch (err: any) {
+        results.push({ file: file.originalname, error: err?.message ?? 'Could not read this file.' });
+        continue;
+      }
+      const code = classCodeFromLabel(parsed.classLabel ?? '');
+      if (!code) {
+        results.push({ file: file.originalname, error: 'This file does not say which class it belongs to.' });
+        continue;
+      }
+      const level = levels.find((item) => this.levelMatches(item.name, code.level));
+      if (!level) {
+        results.push({
+          file: file.originalname,
+          class_label: parsed.classLabel,
+          error: `${code.level} is not a P-level in ${year.name}.`,
+        });
+        continue;
+      }
+      let cls = await this.findClassForCode(level.id, code.level, code.letter);
+      let classCreated = false;
+      if (!cls) {
+        if (dryRun) {
+          results.push({
+            file: file.originalname,
+            class_label: `${code.level}${code.letter}`,
+            class_created: true,
+            headers: parsed.headers,
+            new_count: parsed.rows.length,
+            already_in_class: 0,
+            already_elsewhere: 0,
+            message: `${code.level}${code.letter} will be created with ${parsed.rows.length} student${parsed.rows.length === 1 ? '' : 's'}.`,
+          });
+          continue;
+        }
+        cls = await this.classRepo.save(this.classRepo.create({
+          name: code.letter,
+          p_level_id: level.id,
+          status: 'active',
+        }));
+        classCreated = true;
+      }
+      const applied = await this.importClassList(cls.id, file.buffer, dryRun, user);
+      results.push({
+        file: file.originalname,
+        class_label: `${code.level}${code.letter}`,
+        class_created: classCreated,
+        ...applied,
+      });
+    }
+
+    const failed = results.filter((item) => item.error).length;
+    const ready = results.length - failed;
+    return {
+      results,
+      message: dryRun
+        ? `${ready} class list${ready === 1 ? '' : 's'} ready. ${failed} file${failed === 1 ? '' : 's'} could not be matched.`
+        : `${ready} class list${ready === 1 ? '' : 's'} updated. ${failed} file${failed === 1 ? '' : 's'} could not be matched.`,
+    };
+  }
+
+  private levelMatches(pLevelName: string, level: string): boolean {
+    const compact = pLevelName.toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (compact === level) return true;
+    const digit = level.match(/^P(\d+)$/);
+    return !!digit && compact === `PRIMARY${digit[1]}`;
+  }
+
+  private async findClassForCode(pLevelId: number, level: string, letter: string) {
+    const classes = await this.classRepo.find({ where: { p_level_id: pLevelId, status: 'active' } });
+    return classes.find((item) => {
+      const compact = item.name.toUpperCase().replace(/[^A-Z0-9]/g, '');
+      return compact === letter || compact === `${level}${letter}`;
+    }) ?? null;
   }
 
   // ─── Excel Import ─────────────────────────────────────────────────────────────

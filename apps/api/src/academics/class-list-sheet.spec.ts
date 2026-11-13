@@ -1,5 +1,5 @@
 import * as XLSX from 'xlsx';
-import { parseClassListSheet } from './class-list-sheet';
+import { classCodeFromLabel, parseClassListSheet } from './class-list-sheet';
 
 function workbook(rows: unknown[][], bookType: 'xlsx' | 'xls' = 'xlsx'): Buffer {
   const book = XLSX.utils.book_new();
@@ -38,5 +38,25 @@ describe('parseClassListSheet', () => {
     expect(parsed.rows[0].name).toBe('AKARIZA Erica Ailla');
     expect(parsed.rows[0].cells['MATHEMATIQUES TOT']).toBe('24');
     expect(parsed.rows[0].marks).toBe(16);
+  });
+
+  it('reads an SDMS student list and keeps the full student code', () => {
+    const parsed = parseClassListSheet(workbook([
+      ['STUDENT LIST', '', '', '', '', 'Academic Year: 2026/2027'],
+      ['School:', 'JERICHO SCHOOL'],
+      ['Class:', 'P1-A'],
+      [],
+      ['#', 'Student Code', 'Names'],
+      [1, 110836250053, 'AGANZE Miracle'],
+      ['Government of Rwanda - SDMS', '', ''],
+    ], 'xls'));
+    expect(parsed.classLabel).toBe('P1-A');
+    expect(classCodeFromLabel(parsed.classLabel ?? '')).toEqual({ level: 'P1', letter: 'A' });
+    expect(classCodeFromLabel('P4D')).toEqual({ level: 'P4', letter: 'D' });
+    expect(parsed.headers).toEqual(['#', 'Student Code', 'Names']);
+    expect(parsed.rows).toHaveLength(1);
+    expect(parsed.rows[0].name).toBe('AGANZE Miracle');
+    expect(parsed.rows[0].studentIdNumber).toBe('110836250053');
+    expect(parsed.rows[0].cells['Student Code']).toBe('110836250053');
   });
 });

@@ -22,18 +22,30 @@ export interface ParsedClassRow {
 export interface ParsedClassSheet {
   headers: string[];
   rows: ParsedClassRow[];
+  classLabel: string | null;
 }
 
 const NAME_HEADER = /^(names?|noms?( et pr[eé]noms?)?|student name|full name|fullname)$/i;
 const RANK_HEADER = /^(rank|position|place|class position)$/i;
 const MARKS_HEADER = /^(marks|marks %|marks%|percentage|average|moyenne|total %)$/i;
 const FORMER_HEADER = /^(former class|former_class|previous class|ancienne classe)$/i;
-const ID_HEADER = /^(student id|student_id|id|reg no|registration number|matricule|code)$/i;
+const ID_HEADER = /^(student id|student_id|student code|id|reg no|registration number|matricule|code)$/i;
 const SUB_HEADER = /^(cat|exam|tot|tj|total)$/i;
 
 function text(value: unknown): string {
-  if (value == null) return '';
+  if (value == null || value === '') return '';
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return Number.isInteger(value) ? String(value) : String(value);
+  }
   return String(value).replace(/\s+/g, ' ').trim();
+}
+
+/** P1-A, P1C and P 4 D all become level P4 and letter D. */
+export function classCodeFromLabel(label: string): { level: string; letter: string } | null {
+  const compact = label.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const match = compact.match(/^([A-Z]+\d+)([A-Z])$/);
+  if (!match) return null;
+  return { level: match[1], letter: match[2] };
 }
 
 function isNameHeader(value: string): boolean {
@@ -51,7 +63,7 @@ export function parseClassListSheet(buffer: Buffer): ParsedClassSheet {
   let parsed: ParsedClassSheet | null = null;
   for (const name of workbook.SheetNames) {
     const sheet = workbook.Sheets[name];
-    const grid = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false }) as unknown[][];
+    const grid = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: true }) as unknown[][];
     const attempt = parseGrid(grid);
     if (attempt) {
       parsed = attempt;
@@ -139,7 +151,17 @@ function parseGrid(grid: unknown[][]): ParsedClassSheet | null {
     });
   }
 
-  return { headers, rows };
+  let classLabel: string | null = null;
+  for (let r = 0; r < Math.min(grid.length, 20); r++) {
+    const label = text((grid[r] ?? [])[0]).replace(/:$/, '');
+    const value = text((grid[r] ?? [])[1]);
+    if (/^class$/i.test(label) && value) {
+      classLabel = value;
+      break;
+    }
+  }
+
+  return { headers, rows, classLabel };
 }
 
 export function normalizeName(name: string): string {
