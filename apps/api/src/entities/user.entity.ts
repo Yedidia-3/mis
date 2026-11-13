@@ -17,6 +17,10 @@ export class User {
   @Column({ length: 150, unique: true })
   email: string;
 
+  // Sign-in identifier. Stored as 0788123456 for Rwanda numbers.
+  @Column({ type: 'varchar', length: 20, unique: true, nullable: true })
+  phone: string | null;
+
   @Column()
   @Exclude()
   password: string;

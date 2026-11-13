@@ -24,6 +24,7 @@ interface User {
   id: number;
   name: string;
   email: string;
+  phone: string | null;
   role: string;
   status: string;
   last_login: string | null;
@@ -69,12 +70,13 @@ export function UserManagement() {
   const [addLoading, setAddLoading] = useState(false);
   const [addError, setAddError] = useState("");
   const [newName, setNewName] = useState("");
+  const [newPhone, setNewPhone] = useState("");
   const [newEmail, setNewEmail] = useState("");
   const [newRole, setNewRole] = useState("dean");
 
   // Credential reveal modal
   const [credOpen, setCredOpen] = useState(false);
-  const [cred, setCred] = useState<{ name: string; email: string; password: string } | null>(null);
+  const [cred, setCred] = useState<{ name: string; phone: string; email: string; password: string } | null>(null);
   const [copied, setCopied] = useState(false);
 
   // Reset password result
@@ -85,6 +87,7 @@ export function UserManagement() {
   const [editOpen, setEditOpen] = useState(false);
   const [editUser, setEditUser] = useState<User | null>(null);
   const [editName, setEditName] = useState("");
+  const [editPhone, setEditPhone] = useState("");
   const [editEmail, setEditEmail] = useState("");
   const [editSaving, setEditSaving] = useState(false);
   const [editError, setEditError] = useState("");
@@ -105,6 +108,7 @@ export function UserManagement() {
   const filteredUsers = users.filter((u) => {
     const matchesSearch =
       u.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (u.phone ?? "").toLowerCase().includes(searchTerm.toLowerCase()) ||
       u.email.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesRole = roleFilter === "all" || u.role === roleFilter;
     const matchesStatus = statusFilter === "all" || u.status === statusFilter;
@@ -118,13 +122,14 @@ export function UserManagement() {
     try {
       const res = await api.post<User & { temp_password: string }>("/api/v1/admin/users", {
         name: newName,
+        phone: newPhone,
         email: newEmail,
         role: newRole,
       });
       await loadUsers();
       setAddOpen(false);
-      setNewName(""); setNewEmail(""); setNewRole("dean");
-      setCred({ name: (res as any).name, email: (res as any).email, password: (res as any).temp_password });
+      setNewName(""); setNewPhone(""); setNewEmail(""); setNewRole("dean");
+      setCred({ name: (res as any).name, phone: (res as any).phone, email: (res as any).email, password: (res as any).temp_password });
       setCredOpen(true);
     } catch (err: any) {
       setAddError(err.message ?? "Failed to create user");
@@ -136,6 +141,7 @@ export function UserManagement() {
   const openEdit = (user: User) => {
     setEditUser(user);
     setEditName(user.name);
+    setEditPhone(user.phone ?? "");
     setEditEmail(user.email);
     setEditError("");
     setEditOpen(true);
@@ -149,6 +155,7 @@ export function UserManagement() {
     try {
       await api.put(`/api/v1/admin/users/${editUser.id}`, {
         name: editName.trim(),
+        phone: editPhone.trim(),
         email: editEmail.trim(),
       });
       await loadUsers();
@@ -258,6 +265,7 @@ export function UserManagement() {
                 <TableHeader style={{ backgroundColor: "var(--navy-blue)" }}>
                   <TableRow>
                     <TableHead className="text-white">Name</TableHead>
+                    <TableHead className="text-white">Phone</TableHead>
                     <TableHead className="text-white">Email</TableHead>
                     <TableHead className="text-white">Role</TableHead>
                     <TableHead className="text-white">Status</TableHead>
@@ -268,7 +276,7 @@ export function UserManagement() {
                 <TableBody>
                   {filteredUsers.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={6} className="text-center py-12" style={{ color: "var(--mid-gray)" }}>
+                      <TableCell colSpan={7} className="text-center py-12" style={{ color: "var(--mid-gray)" }}>
                         No users found. Use "Add User" to create the first one.
                       </TableCell>
                     </TableRow>
@@ -287,6 +295,9 @@ export function UserManagement() {
                               </span>
                             )}
                           </div>
+                        </TableCell>
+                        <TableCell style={{ color: user.phone ? "var(--dark-gray)" : "var(--danger-red)" }}>
+                          {user.phone || "Not set"}
                         </TableCell>
                         <TableCell style={{ color: "var(--dark-gray)" }}>{user.email}</TableCell>
                         <TableCell>
@@ -356,6 +367,12 @@ export function UserManagement() {
                 value={newName} onChange={(e) => setNewName(e.target.value)} required />
             </div>
             <div>
+              <Label>Phone number</Label>
+              <Input className="mt-2 h-11" type="tel" inputMode="tel" placeholder="0788123456"
+                value={newPhone} onChange={(e) => setNewPhone(e.target.value)} required />
+              <p className="text-xs mt-1" style={{ color: "var(--mid-gray)" }}>This is what they type to sign in.</p>
+            </div>
+            <div>
               <Label>Email Address</Label>
               <Input className="mt-2 h-11" type="email" placeholder="e.g. jc.habimana@jericho.rw"
                 value={newEmail} onChange={(e) => setNewEmail(e.target.value)} required />
@@ -403,8 +420,8 @@ export function UserManagement() {
             </p>
             <div className="rounded-lg p-4 space-y-3" style={{ backgroundColor: "var(--light-gray)" }}>
               <div>
-                <p className="text-xs font-semibold mb-1" style={{ color: "var(--mid-gray)" }}>EMAIL</p>
-                <p className="font-mono text-sm" style={{ color: "var(--dark-gray)" }}>{cred?.email}</p>
+                <p className="text-xs font-semibold mb-1" style={{ color: "var(--mid-gray)" }}>PHONE NUMBER</p>
+                <p className="font-mono text-sm" style={{ color: "var(--dark-gray)" }}>{cred?.phone}</p>
               </div>
               <div>
                 <p className="text-xs font-semibold mb-1" style={{ color: "var(--mid-gray)" }}>TEMPORARY PASSWORD</p>
@@ -413,7 +430,7 @@ export function UserManagement() {
                     {cred?.password}
                   </p>
                   <button
-                    onClick={() => copyToClipboard(`Email: ${cred?.email}\nPassword: ${cred?.password}`)}
+                    onClick={() => copyToClipboard(`Phone: ${cred?.phone}\nPassword: ${cred?.password}`)}
                     className="p-2 rounded-md hover:bg-gray-200 transition-colors"
                   >
                     {copied ? <Check size={18} style={{ color: "var(--success-green)" }} /> : <Copy size={18} style={{ color: "var(--mid-gray)" }} />}
@@ -477,6 +494,12 @@ export function UserManagement() {
               <Label>Full Name</Label>
               <Input className="mt-2 h-11" value={editName}
                 onChange={(e) => setEditName(e.target.value)} required />
+            </div>
+            <div>
+              <Label>Phone number</Label>
+              <Input className="mt-2 h-11" type="tel" inputMode="tel" placeholder="0788123456" value={editPhone}
+                onChange={(e) => setEditPhone(e.target.value)} required />
+              <p className="text-xs mt-1" style={{ color: "var(--mid-gray)" }}>This is what they type to sign in.</p>
             </div>
             <div>
               <Label>Email Address</Label>

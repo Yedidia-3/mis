@@ -20,7 +20,7 @@ export function LoginScreen() {
   const navigate = useNavigate();
   const location = useLocation();
   const { setAuth, user, isAuthenticated } = useAuth();
-  const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
 
   useEffect(() => {
     if (isAuthenticated && user && location.pathname === "/login") {
@@ -39,7 +39,7 @@ export function LoginScreen() {
     try {
       const res = await api.post<{ token: string; user: AuthUser }>(
         '/api/v1/auth/login',
-        { email, password }
+        { phone, password }
       );
       setAuth(res.user, res.token);
       if (res.user.must_change_password) {
@@ -48,9 +48,7 @@ export function LoginScreen() {
         navigate(roleRoutes[res.user.role] ?? '/');
       }
     } catch (err: any) {
-      // No page reload — keep the email, clear only the password, and refocus
-      // it so the user just retypes the password.
-      setError(err.message ?? "Invalid email or password");
+      setError(err.message ?? "Invalid phone number or password");
       setPassword("");
       requestAnimationFrame(() =>
         (document.getElementById("password") as HTMLInputElement | null)?.focus()
@@ -119,25 +117,26 @@ export function LoginScreen() {
           {/* Heading */}
           <div className="mb-8">
             <h2 className="text-3xl font-bold" style={{ color: "var(--dark-gray)" }}>Welcome back</h2>
-            <p className="mt-2 text-base" style={{ color: "var(--mid-gray)" }}>Sign in to your account</p>
+            <p className="mt-2 text-base" style={{ color: "var(--mid-gray)" }}>Sign in with your phone number</p>
           </div>
 
           {/* Form */}
           <form onSubmit={handleSubmit} className="space-y-6">
             <div>
-              <Label htmlFor="email" className="text-sm font-medium" style={{ color: "var(--dark-gray)" }}>
-                Email address
+              <Label htmlFor="phone" className="text-sm font-medium" style={{ color: "var(--dark-gray)" }}>
+                Phone number
               </Label>
               <Input
-                id="email"
-                type="email"
-                placeholder="you@jericho.rw"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                id="phone"
+                type="tel"
+                inputMode="tel"
+                placeholder="0788123456"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
                 className="mt-2 h-12 text-base"
                 style={{ borderColor: error ? "var(--danger-red)" : "var(--border)" }}
                 required
-                autoComplete="email"
+                autoComplete="username"
               />
             </div>
 

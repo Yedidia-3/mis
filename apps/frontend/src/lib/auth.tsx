@@ -6,6 +6,7 @@ export interface AuthUser {
   id: number;
   name: string;
   email: string;
+  phone?: string | null;
   role: UserRole;
   must_change_password: boolean;
   avatar?: string | null;
@@ -22,7 +23,7 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | null>(null);
 
 // Bump this whenever the stored auth shape changes — forces a clean re-login
-const SESSION_VERSION = '2';
+const SESSION_VERSION = '3';
 
 function clearSession() {
   localStorage.removeItem('user');
@@ -41,7 +42,7 @@ function loadStoredUser(): AuthUser | null {
     if (!stored) return null;
     const parsed = JSON.parse(stored) as AuthUser;
     // Validate the stored object has the required fields
-    if (!parsed?.id || !parsed?.role || !parsed?.email) {
+    if (!parsed?.id || !parsed?.role) {
       clearSession();
       return null;
     }

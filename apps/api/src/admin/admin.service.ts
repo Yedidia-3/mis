@@ -7,6 +7,7 @@ import { AcademicYear } from '../entities/academic-year.entity';
 import { PLevel } from '../entities/p-level.entity';
 import { ShuffleSession } from '../entities/shuffle-session.entity';
 import { User } from '../entities/user.entity';
+import { canonicalPhone } from '../auth/phone';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 
@@ -44,7 +45,7 @@ export class AdminService implements OnApplicationBootstrap {
 
   async listUsers() {
     return this.userRepo.find({
-      select: ['id', 'name', 'email', 'role', 'status', 'must_change_password', 'last_login', 'created_at'],
+      select: ['id', 'name', 'email', 'phone', 'role', 'status', 'must_change_password', 'last_login', 'created_at'],
       order: { created_at: 'DESC' },
     });
   }
@@ -52,7 +53,7 @@ export class AdminService implements OnApplicationBootstrap {
   /** Returns non-admin staff (dean, principal, teacher, accountant) — accessible to dean/principal */
   async listStaff(role?: string) {
     const qb = this.userRepo.createQueryBuilder('u')
-      .select(['u.id', 'u.name', 'u.email', 'u.role', 'u.status'])
+      .select(['u.id', 'u.name', 'u.email', 'u.phone', 'u.role', 'u.status'])
       .where('u.role != :admin', { admin: 'super_admin' })
       .andWhere('u.status = :status', { status: 'active' });
     if (role) qb.andWhere('u.role = :role', { role });
@@ -70,14 +71,19 @@ export class AdminService implements OnApplicationBootstrap {
   }
 
   async createUser(dto: CreateUserDto) {
-    const exists = await this.userRepo.findOne({ where: { email: dto.email } });
-    if (exists) throw new BadRequestException('A user with this email already exists');
+    const phone = canonicalPhone(dto.phone);
+    if (!phone) throw new BadRequestException('Enter a valid phone number, such as 0788123456');
+    const emailTaken = await this.userRepo.findOne({ where: { email: dto.email } });
+    if (emailTaken) throw new BadRequestException('A user with this email already exists');
+    const phoneTaken = await this.userRepo.findOne({ where: { phone } });
+    if (phoneTaken) throw new BadRequestException('A user with this phone number already exists');
 
     const tempPassword = this.generateTempPassword();
     const hashed = await bcrypt.hash(tempPassword, 10);
     const user = this.userRepo.create({
       name: dto.name,
       email: dto.email,
+      phone,
       role: dto.role as any,
       password: hashed,
       must_change_password: true,
@@ -90,7 +96,21 @@ export class AdminService implements OnApplicationBootstrap {
   async updateUser(id: number, dto: UpdateUserDto) {
     const user = await this.userRepo.findOne({ where: { id } });
     if (!user) throw new NotFoundException('User not found');
-    Object.assign(user, dto);
+    if (dto.phone !== undefined) {
+      const phone = canonicalPhone(dto.phone);
+      if (!phone) throw new BadRequestException('Enter a valid phone number, such as 0788123456');
+      const taken = await this.userRepo.findOne({ where: { phone } });
+      if (taken && taken.id !== user.id) throw new BadRequestException('A user with this phone number already exists');
+      user.phone = phone;
+    }
+    if (dto.email && dto.email !== user.email) {
+      const taken = await this.userRepo.findOne({ where: { email: dto.email } });
+      if (taken && taken.id !== user.id) throw new BadRequestException('A user with this email already exists');
+      user.email = dto.email;
+    }
+    if (dto.name !== undefined) user.name = dto.name;
+    if (dto.role !== undefined) user.role = dto.role as any;
+    if (dto.status !== undefined) user.status = dto.status;
     const saved = await this.userRepo.save(user);
     const { password, ...safe } = saved;
     return safe;

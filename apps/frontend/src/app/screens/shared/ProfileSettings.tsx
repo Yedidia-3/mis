@@ -146,12 +146,17 @@ export function ProfileSettings() {
               <Input value={name} onChange={e => setName(e.target.value)} className="mt-2 h-11" />
             </div>
             <div>
+              <Label>Phone number</Label>
+              <Input value={user?.phone || "Not set"} readOnly className="mt-2 h-11"
+                style={{ backgroundColor: "var(--light-gray)", color: "var(--mid-gray)" }} />
+              <p className="text-xs mt-1" style={{ color: "var(--mid-gray)" }}>
+                This is what you use to sign in. Contact the Super Admin to change it.
+              </p>
+            </div>
+            <div>
               <Label>Email</Label>
               <Input value={user?.email ?? ""} readOnly className="mt-2 h-11"
                 style={{ backgroundColor: "var(--light-gray)", color: "var(--mid-gray)" }} />
-              <p className="text-xs mt-1" style={{ color: "var(--mid-gray)" }}>
-                Contact the Super Admin to change your email.
-              </p>
             </div>
             <div>
               <Label>Role</Label>

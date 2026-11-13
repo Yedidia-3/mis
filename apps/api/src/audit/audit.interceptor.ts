@@ -89,7 +89,7 @@ export class AuditInterceptor implements NestInterceptor {
         const ip = (req.headers?.['x-forwarded-for'] || req.ip || '').toString().split(',')[0] || '—';
 
         // For login, the actor comes from the response/body email (no req.user yet)
-        const actorName = user?.email || req.body?.email || 'System';
+        const actorName = user?.phone || user?.email || req.body?.phone || req.body?.email || 'System';
         const actorRole = user?.role || (path === '/auth/login' ? 'user' : 'system');
 
         const target = describeTarget(path, ctx.params, ctx.body);
@@ -121,7 +121,7 @@ function asId(value: unknown): number | undefined {
 function describeTarget(path: string, params: any, body: any): { target_type?: string; target_id?: number; target_name?: string } {
   const name = typeof body?.name === 'string' ? body.name : undefined;
   if (path.startsWith('/admin/users')) {
-    return { target_type: 'user', target_id: asId(params?.id), target_name: name || body?.email };
+    return { target_type: 'user', target_id: asId(params?.id), target_name: name || body?.phone || body?.email };
   }
   if (path.includes('/academic-years')) {
     return { target_type: 'academic year', target_id: asId(params?.id), target_name: name };
@@ -148,7 +148,7 @@ function describeTarget(path: string, params: any, body: any): { target_type?: s
     return { target_type: 'attendance', target_id: asId(params?.id) };
   }
   if (path.startsWith('/auth')) {
-    return { target_type: 'account', target_name: body?.email };
+    return { target_type: 'account', target_name: body?.phone || body?.email };
   }
   return {};
 }

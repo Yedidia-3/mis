@@ -6,6 +6,7 @@ import * as bcrypt from 'bcrypt';
 import { Repository } from 'typeorm';
 import { User } from '../entities/user.entity';
 import { LoginDto } from './dto/login.dto';
+import { phoneLookupKeys } from './phone';
 
 const MAX_FAILED_ATTEMPTS = 5;
 const LOCKOUT_MINUTES = 30;
@@ -19,9 +20,9 @@ export class AuthService {
   ) {}
 
   async login(dto: LoginDto) {
-    const user = await this.userRepo.findOne({ where: { email: dto.email } });
+    const user = await this.findByLogin(dto.phone);
 
-    if (!user) throw new UnauthorizedException('Invalid email or password');
+    if (!user) throw new UnauthorizedException('Invalid phone number or password');
 
     if (user.status === 'inactive') throw new UnauthorizedException('Your account is inactive. Contact your administrator.');
 
@@ -37,7 +38,7 @@ export class AuthService {
         user.failed_login_attempts = 0;
       }
       await this.userRepo.save(user);
-      throw new UnauthorizedException('Invalid email or password');
+      throw new UnauthorizedException('Invalid phone number or password');
     }
 
     user.failed_login_attempts = 0;
@@ -46,7 +47,7 @@ export class AuthService {
     await this.userRepo.save(user);
 
     const token = this.jwtService.sign(
-      { sub: user.id, email: user.email, role: user.role },
+      { sub: user.id, email: user.email, phone: user.phone, role: user.role },
       { expiresIn: this.config.get('JWT_EXPIRES_IN') ?? '2h' },
     );
 
@@ -86,5 +87,18 @@ export class AuthService {
     await this.userRepo.save(user);
     const { password, ...safeUser } = user;
     return safeUser;
+  }
+
+  private async findByLogin(raw: string): Promise<User | null> {
+    const value = raw.trim();
+    if (value.includes('@')) {
+      return this.userRepo
+        .createQueryBuilder('u')
+        .where('LOWER(u.email) = :email', { email: value.toLowerCase() })
+        .getOne();
+    }
+    const keys = phoneLookupKeys(value);
+    if (!keys.length) return null;
+    return this.userRepo.createQueryBuilder('u').where('u.phone IN (:...keys)', { keys }).getOne();
   }
 }
