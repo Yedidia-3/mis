@@ -1,5 +1,5 @@
 import { AlertTriangle, ArrowLeft, ArrowLeftRight, CheckCircle2, Loader2, MoreVertical, Plus, Search, Upload, Users, XCircle } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import { toast } from "sonner";
 import { api } from "../../../lib/api";
@@ -97,6 +97,8 @@ export function ClassManagement() {
   const [importing, setImporting] = useState(false);
   const [importPreview, setImportPreview] = useState<any | null>(null);
   const [importFile, setImportFile] = useState<File | null>(null);
+  const [importOutcome, setImportOutcome] = useState<any | null>(null);
+  const importPanelRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async () => {
     if (!pLevelId) return;
@@ -287,17 +289,26 @@ export function ClassManagement() {
     }
   };
 
+  const openImportStudents = (classItem: ClassData) => {
+    setSelectedClass(classItem);
+    setClassViewMode('view');
+    void loadClassStudents(classItem.id);
+    window.setTimeout(() => importPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+  };
+
   const confirmImport = async () => {
     if (!importFile || !selectedClass) return;
     setImporting(true);
     try {
       const result = await uploadClassList(importFile, false);
-      toast.success(result?.message ?? 'Class list updated');
       setImportPreview(null);
       setImportFile(null);
+      setImportOutcome(result ?? { message: 'The class list was updated.' });
       await Promise.all([load(), loadClassStudents(selectedClass.id)]);
     } catch (err: any) {
-      toast.error(err.message ?? 'Import failed');
+      setImportPreview(null);
+      setImportFile(null);
+      setImportOutcome({ failed: true, message: err.message ?? 'Import failed' });
     } finally {
       setImporting(false);
     }
@@ -417,10 +428,6 @@ export function ClassManagement() {
         </div>
         {!isPrincipal && (
           <div className="flex gap-2">
-            <Button onClick={() => navigate(`/dean/import`)} variant="outline" className="h-11"
-              style={{ color: "var(--maroon)", borderColor: "var(--maroon)" }}>
-              <Upload size={18} className="mr-2" /> Import Excel
-            </Button>
             <Button onClick={() => setShowAddDialog(true)} className="h-11"
               style={{ backgroundColor: "var(--maroon)", color: "#FFFFFF" }}>
               <Plus size={18} className="mr-2" /> Create Class List
@@ -445,29 +452,21 @@ export function ClassManagement() {
                   <Button variant={classViewMode === 'update' ? 'default' : 'outline'} onClick={() => { setClassViewMode('update'); if (!classStudents.length) loadClassStudents(selectedClass.id); }} style={classViewMode === 'update' ? { backgroundColor: 'var(--navy-blue)', color: '#fff' } : { color: 'var(--navy-blue)', borderColor: 'var(--navy-blue)' }}>
                     Update Class List
                   </Button>
+                  <Button onClick={() => importPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })} style={{ backgroundColor: 'var(--maroon)', color: '#fff' }}>
+                    <Upload size={16} className="mr-2" /> Import Students
+                  </Button>
                 </div>
               )}
             </div>
 
-            {!isPrincipal && classViewMode === 'update' && (
-              <div className="rounded-lg border p-4" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--light-gray)' }}>
-                <div className="flex flex-col gap-3 md:flex-row md:items-end">
-                  <div className="flex-1">
-                    <Label>Add students to this class</Label>
-                    <Input
-                      className="mt-2 h-11"
-                      placeholder="Type names, one per line or separated by commas"
-                      value={manualStudentNames}
-                      onChange={(e) => setManualStudentNames(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleAddStudentsToClass(); } }}
-                    />
-                  </div>
-                  <Button onClick={handleAddStudentsToClass} disabled={saving || !manualStudentNames.trim()} style={{ backgroundColor: 'var(--maroon)', color: '#fff' }}>
-                    Add Students
-                  </Button>
-                </div>
+            {!isPrincipal && (
+              <div ref={importPanelRef} className="rounded-lg border p-4" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--light-gray)' }}>
+                <p className="text-base font-semibold" style={{ color: 'var(--dark-gray)' }}>Import Students</p>
+                <p className="text-sm mt-1 mb-3" style={{ color: 'var(--mid-gray)' }}>
+                  Drop this class’s Excel file. Students already on the list stay as they are. Only new names are added.
+                </p>
                 <div
-                  className="mt-4 border-2 border-dashed rounded-lg p-6 text-center"
+                  className="border-2 border-dashed rounded-lg p-6 text-center"
                   style={{ borderColor: 'var(--navy-blue)', backgroundColor: '#FFFFFF' }}
                   onDragOver={(e) => e.preventDefault()}
                   onDrop={(e) => {
@@ -494,9 +493,29 @@ export function ClassManagement() {
                     </label>
                   </p>
                   <p className="text-xs mt-1" style={{ color: 'var(--mid-gray)' }}>
-                    .xls or .xlsx. Names already in this class stay as they are. Only new names are added, and the columns switch to match the file.
+                    .xls or .xlsx. After you confirm, this page shows exactly who was added and who was left out.
                   </p>
                   {importing && <Loader2 className="mx-auto mt-3 animate-spin" size={18} style={{ color: 'var(--navy-blue)' }} />}
+                </div>
+              </div>
+            )}
+
+            {!isPrincipal && classViewMode === 'update' && (
+              <div className="rounded-lg border p-4" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--light-gray)' }}>
+                <div className="flex flex-col gap-3 md:flex-row md:items-end">
+                  <div className="flex-1">
+                    <Label>Add students to this class</Label>
+                    <Input
+                      className="mt-2 h-11"
+                      placeholder="Type names, one per line or separated by commas"
+                      value={manualStudentNames}
+                      onChange={(e) => setManualStudentNames(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleAddStudentsToClass(); } }}
+                    />
+                  </div>
+                  <Button onClick={handleAddStudentsToClass} disabled={saving || !manualStudentNames.trim()} style={{ backgroundColor: 'var(--maroon)', color: '#fff' }}>
+                    Add Students
+                  </Button>
                 </div>
               </div>
             )}
@@ -753,6 +772,9 @@ export function ClassManagement() {
                           <DropdownMenuItem onClick={() => { setSelectedClass(classItem); setClassViewMode('update'); void loadClassStudents(classItem.id); }}>
                             Update Class List
                           </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => openImportStudents(classItem)}>
+                            Import Students
+                          </DropdownMenuItem>
                           <DropdownMenuItem onClick={() => { setSelectedClass(classItem); setShowExportDialog(true); }}>
                             Download Class List
                           </DropdownMenuItem>
@@ -792,18 +814,25 @@ export function ClassManagement() {
                       View Class List
                     </Button>
                   ) : (
-                    <div className="mt-6 grid grid-cols-2 gap-2">
-                      <Button onClick={() => { setSelectedClass(classItem); setClassViewMode('view'); void loadClassStudents(classItem.id); }}
-                        className="w-full" variant="outline"
-                        style={{ color: "var(--maroon)", borderColor: "var(--maroon)" }}>
-                        View
+                    <>
+                      <div className="mt-6 grid grid-cols-2 gap-2">
+                        <Button onClick={() => { setSelectedClass(classItem); setClassViewMode('view'); void loadClassStudents(classItem.id); }}
+                          className="w-full" variant="outline"
+                          style={{ color: "var(--maroon)", borderColor: "var(--maroon)" }}>
+                          View
+                        </Button>
+                        <Button onClick={() => { setSelectedClass(classItem); setClassViewMode('update'); void loadClassStudents(classItem.id); }}
+                          className="w-full" variant="outline"
+                          style={{ color: "var(--navy-blue)", borderColor: "var(--navy-blue)" }}>
+                          Update
+                        </Button>
+                      </div>
+                      <Button onClick={() => openImportStudents(classItem)}
+                        className="w-full mt-2"
+                        style={{ backgroundColor: "var(--maroon)", color: "#fff" }}>
+                        <Upload size={16} className="mr-2" /> Import Students
                       </Button>
-                      <Button onClick={() => { setSelectedClass(classItem); setClassViewMode('update'); void loadClassStudents(classItem.id); }}
-                        className="w-full" variant="outline"
-                        style={{ color: "var(--navy-blue)", borderColor: "var(--navy-blue)" }}>
-                        Update
-                      </Button>
-                    </div>
+                    </>
                   )}
                   <Button onClick={() => { setSelectedClass(classItem); setShowExportDialog(true); }}
                     className="w-full mt-3" variant="outline"
@@ -968,7 +997,61 @@ export function ClassManagement() {
             <Button variant="ghost" onClick={() => { setImportPreview(null); setImportFile(null); }} disabled={importing}>Cancel</Button>
             <Button onClick={confirmImport} disabled={importing} style={{ backgroundColor: 'var(--maroon)', color: '#fff' }}>
               {importing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              {importPreview?.new_count ? `Add ${importPreview.new_count} new` : 'Match these columns'}
+              Import students
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!importOutcome} onOpenChange={(open) => { if (!open) setImportOutcome(null); }}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{importOutcome?.failed ? 'Import failed' : 'Import finished'}</DialogTitle>
+            <DialogDescription>
+              {importOutcome?.failed
+                ? 'Nothing was added.'
+                : `${pLevel?.name ?? ''}${selectedClass?.name ?? ''} class list`}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 text-sm" style={{ color: 'var(--dark-gray)' }}>
+            <p className="font-medium">{importOutcome?.message}</p>
+            {!importOutcome?.failed && (
+              <>
+                <p><strong>{importOutcome?.new_count ?? 0}</strong> new student{(importOutcome?.new_count ?? 0) === 1 ? '' : 's'} added.</p>
+                <p><strong>{importOutcome?.already_in_class ?? 0}</strong> already in this class, left unchanged.</p>
+                <p><strong>{importOutcome?.already_elsewhere ?? 0}</strong> already in another class, not added.</p>
+                {!!importOutcome?.new_students?.length && (
+                  <div>
+                    <p className="font-medium mb-1">Added</p>
+                    <div className="max-h-36 overflow-auto rounded border p-2" style={{ borderColor: 'var(--border)' }}>
+                      {importOutcome.new_students.slice(0, 30).map((student: { name: string }) => (
+                        <p key={student.name}>{student.name}</p>
+                      ))}
+                      {importOutcome.new_students.length > 30 && (
+                        <p style={{ color: 'var(--mid-gray)' }}>and {importOutcome.new_students.length - 30} more</p>
+                      )}
+                    </div>
+                  </div>
+                )}
+                {!!importOutcome?.elsewhere?.length && (
+                  <div>
+                    <p className="font-medium mb-1">Not added — already in another class</p>
+                    <div className="max-h-36 overflow-auto rounded border p-2" style={{ borderColor: 'var(--border)' }}>
+                      {importOutcome.elsewhere.slice(0, 30).map((name: string) => (
+                        <p key={name}>{name}</p>
+                      ))}
+                      {importOutcome.elsewhere.length > 30 && (
+                        <p style={{ color: 'var(--mid-gray)' }}>and {importOutcome.elsewhere.length - 30} more</p>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+          <DialogFooter>
+            <Button onClick={() => setImportOutcome(null)} style={{ backgroundColor: 'var(--maroon)', color: '#fff' }}>
+              Back to class list
             </Button>
           </DialogFooter>
         </DialogContent>

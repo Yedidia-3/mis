@@ -207,7 +207,7 @@ export function PLevelManagement() {
                             <DropdownMenuItem onClick={() => navigate(`/dean/p-levels/${pl.id}/classes`)}>
                               Manage Classes
                             </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => navigate(`/dean/import?pLevel=${pl.id}`)}>
+                            <DropdownMenuItem onClick={() => navigate(`/dean/p-levels/${pl.id}/classes`)}>
                               Import Students
                             </DropdownMenuItem>
                             {pl.teaching_model !== "specialist" ? (

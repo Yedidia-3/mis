@@ -56,7 +56,7 @@ const navItems = {
     { icon: LayoutDashboard, label: "Dashboard",    path: "/dean/dashboard" },
     { icon: GraduationCap,   label: "P-Levels",     path: "/dean/p-levels" },
     { icon: Users,           label: "Students",     path: "/students" },
-    { icon: FileText,        label: "Import Data",  path: "/dean/import" },
+    { icon: FileText,        label: "Import Students", path: "/dean/p-levels" },
     { icon: Users,           label: "Distribution", path: "/dean/distribution" },
     { icon: BookOpen,        label: "Courses",      path: "/dean/courses" },
     { icon: BookUser,        label: "Teacher Assignments", path: "/dean/teaching" },

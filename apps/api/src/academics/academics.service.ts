@@ -1120,7 +1120,16 @@ export class AcademicsService {
       elsewhere: other.map((row) => row.name),
       message: dryRun
         ? `${toAdd.length} new, ${already.length} already in this class, ${other.length} already in another class.`
-        : `Added ${toAdd.length} new student(s). ${already.length} already in this class were left unchanged.`,
+        : [
+            toAdd.length
+              ? `Added ${toAdd.length} new student${toAdd.length === 1 ? '' : 's'} to this class.`
+              : 'No new students were added.',
+            `${already.length} already in this class ${already.length === 1 ? 'was' : 'were'} left unchanged.`,
+            other.length
+              ? `${other.length} already in another class ${other.length === 1 ? 'was' : 'were'} not added.`
+              : 'Nobody was skipped for being in another class.',
+            'The class list columns now match the file.',
+          ].join(' '),
     };
   }
 

@@ -140,10 +140,10 @@ export function DeanDashboard() {
           )}
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5 pt-2">
-            <Button onClick={() => navigate("/dean/import")} className="h-20 rounded-2xl flex flex-col items-center justify-center gap-1 shadow-sm"
+            <Button onClick={() => navigate("/dean/p-levels")} className="h-20 rounded-2xl flex flex-col items-center justify-center gap-1 shadow-sm"
               style={{ backgroundColor: "var(--maroon)", color: "#FFFFFF" }}>
-              <span className="text-base font-semibold">Import Excel Data</span>
-              <span className="text-xs font-normal opacity-85">Upload student rosters from spreadsheet</span>
+              <span className="text-base font-semibold">Import Students</span>
+              <span className="text-xs font-normal opacity-85">Open a class list and add only new students</span>
             </Button>
             <Button onClick={() => navigate("/dean/p-levels")} className="h-20 rounded-2xl flex flex-col items-center justify-center gap-1" variant="outline"
               style={{ color: "var(--navy-blue)", borderColor: "var(--navy-blue)" }}>
