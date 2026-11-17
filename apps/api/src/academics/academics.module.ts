@@ -27,6 +27,7 @@ import { GradesService } from './assessments/grades.service';
 import { ExportService } from './export.service';
 import { RecordsController, ReportsController } from './records/records.controller';
 import { RecordsService } from './records/records.service';
+import { RecordingService } from './records/recording.service';
 import { ReportsService } from './records/reports.service';
 import { ShuffleController } from './shuffle/shuffle.controller';
 import { ShuffleService } from './shuffle/shuffle.service';
@@ -51,7 +52,7 @@ import { TeachingService } from './teaching/teaching.service';
   providers: [
     AcademicsService, ExportService, ShuffleService,
     AssessmentsService, GradesService, TeachingService,
-    RecordsService, ReportsService,
+    RecordsService, ReportsService, RecordingService,
   ],
   exports: [AcademicsService, ExportService, AssessmentsService, GradesService, TeachingService],
 })

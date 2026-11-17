@@ -95,7 +95,7 @@ function CurrentBanner({ current, hasTerms }: { current: TermRow | null; hasTerm
           <>
             <div className="font-semibold">Current term: {current.name}</div>
             <div style={{ color: "var(--mid-gray)" }}>
-              {formatDate(current.start_date)} to {formatDate(current.end_date)}. New assessments go into {current.name} automatically.
+              {formatDate(current.start_date)} to {formatDate(current.end_date)}. Teachers record this term's marks while it is open.
             </div>
           </>
         ) : (

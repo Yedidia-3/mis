@@ -3,11 +3,12 @@ import {
   ArrayMaxSize, ArrayUnique, IsArray, IsBoolean, IsIn, IsInt, IsNumber, IsOptional,
   Length, Matches, Max, Min, ValidateIf, ValidateNested,
 } from 'class-validator';
-import { REPORT_KINDS, ReportKind } from '../../../entities/report-card.entity';
+import { ReportKind } from '../../../entities/report-card.entity';
 import { NormaliseText, NUMBER_OPTS, RULES } from '../../assessments/dto/input-rules';
 import { SchoolBand } from '../school-band';
 
-const TERM_MESSAGE = { message: 'Choose a term for mid-term and end of term reports' };
+const TERM_MESSAGE = { message: 'Choose a term for the mid-term bulletin' };
+const KIND_MESSAGE = { message: 'Only the nursery bulletin and the mid-term bulletin are generated here' };
 
 const BANDS: SchoolBand[] = ['nursery', 'lower_primary', 'upper_primary'];
 
@@ -17,12 +18,12 @@ export class BandQueryDto {
   band?: SchoolBand;
 }
 
-/** Which report and which term; end of year has no term. */
+/** Nursery has no term. Mid-term is one term. End of term and end of year are not printed here. */
 export class ReportQueryDto {
-  @IsIn(REPORT_KINDS)
+  @IsIn(['mid_term', 'nursery'], KIND_MESSAGE)
   kind: ReportKind;
 
-  @ValidateIf((o) => o.kind !== 'end_of_year')
+  @ValidateIf((o) => o.kind === 'mid_term')
   @Type(() => Number)
   @IsInt(TERM_MESSAGE)
   @Min(1, TERM_MESSAGE)
@@ -36,10 +37,10 @@ export class GenerateReportsDto {
   @Max(RULES.ID_MAX)
   class_id: number;
 
-  @IsIn(REPORT_KINDS)
+  @IsIn(['mid_term', 'nursery'], KIND_MESSAGE)
   kind: ReportKind;
 
-  @ValidateIf((o) => o.kind !== 'end_of_year')
+  @ValidateIf((o) => o.kind === 'mid_term')
   @IsInt(TERM_MESSAGE)
   @Min(1, TERM_MESSAGE)
   @Max(RULES.ID_MAX, TERM_MESSAGE)

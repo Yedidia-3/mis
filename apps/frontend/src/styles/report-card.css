@@ -50,7 +50,35 @@
 .rc-sign td { height: 30px; }
 .rc-flag { background: #fde8e8; outline: 2px solid #c0392b; outline-offset: -2px; cursor: help; }
 
+.rc-mid th, .rc-mid td { height: 22px; }
+.rc-mid .rc-sign td { height: 28px; white-space: pre-line; }
+
+.nursery-card { max-width: 190mm; font-size: 11pt; }
+.nu-head { display: grid; grid-template-columns: 1.1fr 1fr; gap: 12px; font-weight: 700; margin-bottom: 8px; }
+.nu-id { padding-top: 1.6em; }
+.nu-banner { text-align: center; letter-spacing: 0.04em; margin: 0.4em 0 0.8em; }
+.nu-line { display: flex; gap: 0.6em; margin: 0.15em 0; }
+.nu-line b { font-weight: 700; border-bottom: 1px solid #000; flex: 1; text-align: center; }
+.nu-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.nu-table th, .nu-table td { border: 1px solid #000; height: 18px; text-align: center; font-weight: 700; }
+.nu-table th:first-child, .nu-course, .nu-area td { text-align: left; padding-left: 4px; }
+.nu-area td { background: #f3f3f3; }
+.nu-obs { text-align: center; vertical-align: top; padding: 4px; }
+.nu-obs-block { min-height: 4.2em; }
+.nu-obs-text { font-style: italic; font-weight: 500; margin-top: 0.3em; }
+.nu-excellent { background: #7dce6a; }
+.nu-tres { background: #6eb0e0; }
+.nu-bon { background: #ffe14a; }
+.nu-assez { background: #fff3b0; }
+.nu-key td { font-size: 9pt; }
+.nu-foot { display: grid; grid-template-columns: 1.2fr 1fr; gap: 16px; margin-top: 10px; font-weight: 700; font-size: 10pt; }
+.nu-delib { margin-bottom: 0.3em; }
+.nu-chosen { text-decoration: underline; }
+.nu-signs div { min-height: 1.8em; }
+
 .print-root { display: none; }
+
+@page nursery { size: A4 portrait; margin: 8mm; }
 
 @media print {
   @page { size: landscape; margin: 7mm 6mm 7mm 6mm; }
@@ -61,6 +89,11 @@
   .print-page {
     display: grid; grid-template-columns: 1fr 1fr; column-gap: 10mm; align-items: start;
     break-after: page; page-break-after: always; break-inside: avoid;
+  }
+  .print-page.portrait { page: nursery; display: block; grid-template-columns: 1fr; }
+  .nursery-card { page: nursery; }
+  .nu-excellent, .nu-tres, .nu-bon, .nu-assez, .nu-area td {
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
   }
   .print-page:last-child { break-after: auto; page-break-after: auto; }
   /* The sheet itself prints at 87%. */

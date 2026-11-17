@@ -5,27 +5,15 @@ import { ReportKind } from '../../entities/report-card.entity';
 import { User } from '../../entities/user.entity';
 import { SaveSubjectReportSettingsDto } from './dto/records.dto';
 import {
-  CellFlag, computeTermSubjects, countFlaggedCells, percentageOf, rankTotals,
-  ReportAssessment, ReportCell, ReportMark, ReportSubject, sumCells,
-} from './report-builder';
+  BulletinCode, canonicalSubject, kigaliToday, MarkCell, midtermCopy, midtermLines, nurseryClassTitle,
+  NURSERY_AREAS, NURSERY_SUBJECTS, primaryYear, rankTotals, sumLines,
+} from './bulletin';
+import { ensureBulletinSubjects } from './bulletin-setup';
 import { bandOf, SCHOOL_BANDS } from './school-band';
 
-/** Printed at the top of every bulletin, as on the school's paper template. */
-export const SCHOOL_HEADER = {
-  country: 'REPUBLIQUE DU RWANDA',
-  ministry: 'MINISTERE DE L’EDUCATION',
-  city: 'VILLE DE KIGALI',
-  district: 'DISTRICT DE NYARUGENGE',
-  sector: 'SECTEUR DE NYAMIRAMBO',
-  school: 'JERICHO SCHOOL',
-  phone: '0788695562',
-  email: 'jericho.school@yahoo.com',
-};
-
-export const KIND_LABELS: Record<ReportKind, string> = {
-  mid_term: 'Mid-term report',
-  end_of_term: 'End of term report',
-  end_of_year: 'End of year report',
+export const KIND_LABELS: Record<string, string> = {
+  mid_term: 'Mid-term',
+  nursery: 'Nursery bulletin',
 };
 
 export interface Issue {
@@ -33,45 +21,18 @@ export interface Issue {
   message: string;
 }
 
-export interface SubjectLine {
-  subject_id: number;
-  name: string;
-  code: string;
-  group: string | null;
-  max: number | null;
-  tj?: ReportCell;
-  exam?: ReportCell | null;
-  terms?: ReportCell[];
-  tot: ReportCell;
-}
-
-export interface StudentReport {
-  student_id: number;
-  name: string;
-  student_id_number: string | null;
-  subjects: SubjectLine[];
-  total: number;
-  max_total: number;
-  percentage: number | null;
-  position: number | null;
-  class_size: number;
-  flagged_count: number;
-  flags: string[];
-}
-
-export interface TermRow {
+interface TermRow {
   id: number;
   name: string;
   sequence: number;
   status: 'upcoming' | 'active' | 'closed';
   academic_year_id: number;
+  end_date?: string;
 }
 
 @Injectable()
 export class ReportsService {
   constructor(@InjectDataSource() private db: DataSource) {}
-
-  // ─── Lookups ─────────────────────────────────────────────────────────────────
 
   private async activeYear(): Promise<{ id: number; name: string } | null> {
     const rows = await this.db.query(
@@ -99,7 +60,8 @@ export class ReportsService {
 
   private async loadTerm(termId: number, yearId: number): Promise<TermRow> {
     const rows: TermRow[] = await this.db.query(
-      `SELECT id, name, sequence, status, academic_year_id FROM terms WHERE id = $1`,
+      `SELECT id, name, sequence, status, academic_year_id, end_date::text AS end_date
+       FROM terms WHERE id = $1`,
       [termId],
     );
     if (!rows.length) throw new NotFoundException('Term not found');
@@ -109,7 +71,7 @@ export class ReportsService {
     return rows[0];
   }
 
-  private async roster(classId: number): Promise<{ id: number; name: string; student_id_number: string | null }[]> {
+  private async roster(classId: number) {
     return this.db.query(
       `SELECT id, name, student_id_number FROM students
        WHERE current_class_id = $1 AND status::text <> 'transferred'
@@ -118,252 +80,251 @@ export class ReportsService {
     );
   }
 
-  private async subjects(pLevelId: number): Promise<ReportSubject[]> {
-    const rows: any[] = await this.db.query(
-      `SELECT id, name, code, report_group, report_max FROM subjects
-       WHERE p_level_id = $1 AND status = 'active'
-       ORDER BY display_order ASC, name ASC`,
-      [pLevelId],
-    );
-    return rows.map((r) => ({
-      id: r.id,
-      name: r.name,
-      code: r.code,
-      group: r.report_group ?? null,
-      max: r.report_max === null ? null : Number(r.report_max),
-    }));
+  private assertKind(kind: ReportKind): 'mid_term' | 'nursery' {
+    if (kind === 'mid_term' || kind === 'nursery') return kind;
+    throw new BadRequestException('End of term and end of year reports are produced in CAMIS. This system prints the nursery bulletin and the mid-term.');
   }
 
-  /** Submitted assessments and their marks for a class in one term. */
-  private async termMarks(classId: number, termId: number) {
-    const assessments: ReportAssessment[] = (await this.db.query(
-      `SELECT a.id, a.subject_id, ty.category, a.title, a.max_score
-       FROM assessments a
-       JOIN assessment_types ty ON ty.id = a.assessment_type_id
-       WHERE a.class_id = $1 AND a.term_id = $2 AND a.status = 'submitted' AND ty.category IS NOT NULL`,
-      [classId, termId],
-    )).map((a: any) => ({ ...a, max_score: Number(a.max_score) }));
-
-    const marks = new Map<string, ReportMark>();
-    if (assessments.length) {
-      const rows: any[] = await this.db.query(
-        `SELECT assessment_id, student_id, score, is_absent FROM assessment_scores
-         WHERE assessment_id = ANY($1)`,
-        [assessments.map((a) => a.id)],
-      );
-      for (const r of rows) {
-        marks.set(`${r.assessment_id}:${r.student_id}`, {
-          assessment_id: r.assessment_id,
-          student_id: r.student_id,
-          score: r.score === null ? null : Number(r.score),
-          is_absent: r.is_absent,
-        });
-      }
-    }
-
-    const drafts: { subject_name: string; n: number }[] = await this.db.query(
-      `SELECT s.name AS subject_name, COUNT(*)::int AS n
-       FROM assessments a JOIN subjects s ON s.id = a.subject_id
-       WHERE a.class_id = $1 AND a.term_id = $2 AND a.status = 'draft'
-       GROUP BY s.name ORDER BY s.name`,
-      [classId, termId],
-    );
-    return { assessments, marks, drafts };
-  }
-
-  // ─── Building a class's reports ──────────────────────────────────────────────
-
-  /**
-   * Every student's report for one class, with the problems that would make a
-   * printed bulletin wrong. Blocking issues stop generation outright; warnings
-   * and flagged cells need the dean's explicit confirmation.
-   */
   async buildClass(classId: number, kind: ReportKind, termId?: number) {
+    const printed = this.assertKind(kind);
     const cls = await this.loadClass(classId);
+    if (printed === 'nursery') return this.buildNursery(cls);
+    return this.buildMidterm(cls, termId);
+  }
+
+  private async buildMidterm(cls: any, termId?: number) {
+    if (cls.band === 'nursery') {
+      throw new BadRequestException('Nursery classes use the nursery bulletin, not the mid-term');
+    }
+    if (!termId) throw new BadRequestException('Choose a term');
+    await ensureBulletinSubjects(this.db);
+    const year = primaryYear(cls.p_level_name);
     const issues: Issue[] = [];
-    const subjects = await this.subjects(cls.p_level_id);
-    const roster = await this.roster(classId);
+    if (!year) {
+      issues.push({ level: 'blocking', message: `${cls.p_level_name} does not have a mid-term bulletin` });
+    }
+    const copy = year ? midtermCopy(year) : null;
+    const term = await this.loadTerm(termId, cls.academic_year_id);
+    const roster = await this.roster(cls.id);
+    if (!roster.length) issues.push({ level: 'blocking', message: 'This class has no pupils' });
 
-    if (!subjects.length) issues.push({ level: 'blocking', message: `${cls.p_level_name} has no subjects` });
-    const unset = subjects.filter((s) => s.max === null);
-    if (unset.length) {
-      issues.push({
-        level: 'blocking',
-        message: `No report maximum set for ${unset.map((s) => s.name).join(', ')}`,
+    const dbSubjects: any[] = year
+      ? await this.db.query(
+          `SELECT id, name, code, report_max FROM subjects
+           WHERE p_level_id = $1 AND status = 'active'
+           ORDER BY display_order ASC, name ASC`,
+          [cls.p_level_id],
+        )
+      : [];
+    const byCanon = new Map<BulletinCode, any>();
+    for (const row of dbSubjects) {
+      const code = canonicalSubject(row.code, row.name);
+      if (code && !byCanon.has(code)) byCanon.set(code, row);
+    }
+    const subjects = (copy?.subjects ?? []).map((s) => {
+      const row = byCanon.get(s.code);
+      return row ? { id: row.id, code: s.code, name: s.name, max: s.max } : null;
+    });
+    const missing = (copy?.subjects ?? []).filter((s) => !byCanon.has(s.code));
+    if (missing.length) {
+      issues.push({ level: 'blocking', message: `Missing from ${cls.p_level_name}: ${missing.map((s) => s.name).join(', ')}` });
+    }
+
+    const ready = subjects.filter((s): s is { id: number; code: BulletinCode; name: string; max: number } => !!s);
+    const scoreRows: any[] = ready.length
+      ? await this.db.query(
+          `SELECT student_id, subject_id, score FROM midterm_scores
+           WHERE class_id = $1 AND term_id = $2 AND subject_id = ANY($3)`,
+          [cls.id, term.id, ready.map((s) => s.id)],
+        )
+      : [];
+    const scoreKey = new Map<string, number>(scoreRows.map((r) => [`${r.student_id}:${r.subject_id}`, Number(r.score)]));
+
+    for (const subject of ready) {
+      const any = scoreRows.some((r) => r.subject_id === subject.id);
+      if (!any) issues.push({ level: 'warning', message: `No marks entered for ${subject.name}` });
+    }
+
+    const students = roster.map((st: any) => {
+      const lines = midtermLines(ready, (subjectId) => {
+        const value = scoreKey.get(`${st.id}:${subjectId}`);
+        return value === undefined ? null : value;
       });
-    }
-    if (!roster.length) issues.push({ level: 'blocking', message: 'This class has no students' });
-
-    let term: TermRow | null = null;
-    let terms: TermRow[] = [];
-    let lines = new Map<number, SubjectLine[]>();
-
-    if (kind === 'end_of_year') {
-      terms = await this.db.query(
-        `SELECT id, name, sequence, status, academic_year_id FROM terms
-         WHERE academic_year_id = $1 ORDER BY sequence ASC`,
-        [cls.academic_year_id],
-      );
-      terms = terms.filter((t) => t.sequence >= 1 && t.sequence <= 3);
-      for (const seq of [1, 2, 3]) {
-        if (!terms.some((t) => t.sequence === seq)) {
-          issues.push({ level: 'blocking', message: `Term ${seq} has not been set up for ${cls.academic_year_name}` });
-        }
-      }
-      if (!issues.some((i) => i.level === 'blocking')) {
-        lines = await this.buildYearLines(classId, subjects, roster, terms, issues);
-      }
-    } else {
-      if (!termId) throw new BadRequestException('Choose a term');
-      term = await this.loadTerm(termId, cls.academic_year_id);
-      if (kind === 'end_of_term' && term.status !== 'closed') {
-        issues.push({ level: 'warning', message: `${term.name} is not closed yet, so marks may still change` });
-      }
-      if (!issues.some((i) => i.level === 'blocking')) {
-        const { assessments, marks, drafts } = await this.termMarks(classId, term.id);
-        this.draftWarnings(drafts, term.name, issues);
-        // The school's mid-term bulletin has the same TJ / EXAM / TOT columns as
-        // the end of term one, filled with whatever has been submitted so far.
-        this.coverageWarnings('end_of_term', subjects, assessments, term.name, issues);
-        for (const st of roster) {
-          const results = computeTermSubjects('end_of_term', subjects, assessments, marks, st.id);
-          lines.set(st.id, subjects.map((s, i) => ({
-            subject_id: s.id, name: s.name, code: s.code, group: s.group, max: s.max,
-            tj: results[i].tj,
-            exam: results[i].exam,
-            tot: results[i].tot,
-          })));
-        }
-      }
-    }
-
-    const students: StudentReport[] = roster.map((st) => {
-      const subjectLines = lines.get(st.id) ?? [];
-      const cells = this.cellsOf(subjectLines);
-      const { total, max } = sumCells(subjectLines.map((l) => l.tot));
-      const flags = [...new Set(cells.flatMap((c) => c.flags.map((f) => f.message)))];
+      const { total, max, percentage } = sumLines(lines);
+      const flags = lines.flatMap((l) => l.points.flags.map((f) => f.message));
       return {
         student_id: st.id,
         name: st.name,
         student_id_number: st.student_id_number,
-        subjects: subjectLines,
+        subjects: lines,
+        nursery: null,
         total,
         max_total: max,
-        percentage: subjectLines.length ? percentageOf(total, max) : null,
-        position: null,
+        percentage,
+        position: null as number | null,
         class_size: roster.length,
-        flagged_count: countFlaggedCells(cells),
+        flagged_count: lines.filter((l) => l.points.flags.length).length,
         flags,
       };
     });
+    const ranks = rankTotals(students.map((s) => ({ id: s.student_id, total: s.total })));
+    for (const s of students) s.position = ranks.get(s.student_id) ?? null;
 
-    if (lines.size) {
-      const ranks = rankTotals(students.map((s) => ({ id: s.student_id, total: s.total })));
-      for (const s of students) s.position = ranks.get(s.student_id) ?? null;
-    }
-
+    const date = term.end_date || kigaliToday();
     return {
       header: {
-        ...SCHOOL_HEADER,
-        kind,
-        kind_label: KIND_LABELS[kind],
+        ...(copy ?? {}),
+        kind: 'mid_term' as const,
+        kind_label: KIND_LABELS.mid_term,
         academic_year: cls.academic_year_name,
-        term: term ? { id: term.id, name: term.name, sequence: term.sequence, status: term.status } : null,
-        terms: terms.map((t) => ({ id: t.id, name: t.name, sequence: t.sequence, status: t.status })),
-        class: { id: cls.id, label: cls.label, p_level: cls.p_level_name, p_level_id: cls.p_level_id, band: cls.band },
+        date,
+        term: { id: term.id, name: term.name, sequence: term.sequence, status: term.status },
+        terms: [],
+        areas: [],
+        class: {
+          id: cls.id,
+          label: cls.label,
+          p_level: cls.p_level_name,
+          p_level_id: cls.p_level_id,
+          band: cls.band,
+        },
         class_teacher: cls.class_teacher_name ?? null,
       },
-      subjects,
       issues,
       can_generate: !issues.some((i) => i.level === 'blocking'),
       students,
     };
   }
 
-  private cellsOf(lines: SubjectLine[]): ReportCell[] {
-    return lines.flatMap((l) => [
-      ...(l.tj ? [l.tj] : []),
-      ...(l.exam ? [l.exam] : []),
-      ...(l.terms ?? []),
-    ]);
-  }
+  private async buildNursery(cls: any) {
+    if (cls.band !== 'nursery') {
+      throw new BadRequestException('Only a nursery class uses this bulletin');
+    }
+    const issues: Issue[] = [];
+    const roster = await this.roster(cls.id);
+    if (!roster.length) issues.push({ level: 'blocking', message: 'This class has no pupils' });
 
-  private draftWarnings(drafts: { subject_name: string; n: number }[], termName: string, issues: Issue[]) {
-    for (const d of drafts) {
-      issues.push({
-        level: 'warning',
-        message: `${d.n} ${d.subject_name} assessment${d.n === 1 ? ' is' : 's are'} still a draft in ${termName} and not counted`,
+    const terms: TermRow[] = await this.db.query(
+      `SELECT id, name, sequence, status, academic_year_id, end_date::text AS end_date
+       FROM terms WHERE academic_year_id = $1 AND sequence BETWEEN 1 AND 3
+       ORDER BY sequence ASC`,
+      [cls.academic_year_id],
+    );
+    if (!terms.length) issues.push({ level: 'blocking', message: 'Set up the three terms before printing the nursery bulletin' });
+
+    const ids = roster.map((s: any) => s.id);
+    const ratings: any[] = ids.length && terms.length
+      ? await this.db.query(
+          `SELECT term_id, student_id, subject_code, rating FROM nursery_ratings
+           WHERE student_id = ANY($1) AND term_id = ANY($2)`,
+          [ids, terms.map((t) => t.id)],
+        )
+      : [];
+    const observations: any[] = ids.length && terms.length
+      ? await this.db.query(
+          `SELECT term_id, student_id, observation FROM nursery_observations
+           WHERE student_id = ANY($1) AND term_id = ANY($2)`,
+          [ids, terms.map((t) => t.id)],
+        )
+      : [];
+    const decisions: any[] = ids.length
+      ? await this.db.query(
+          `SELECT student_id, decision FROM nursery_decisions
+           WHERE academic_year_id = $1 AND student_id = ANY($2)`,
+          [cls.academic_year_id, ids],
+        )
+      : [];
+
+    const expected = NURSERY_SUBJECTS.length;
+    const openTerms = terms.filter((t) => t.status === 'active' || t.status === 'closed');
+    for (const term of openTerms) {
+      const filled = new Set(ratings.filter((r) => r.term_id === term.id).map((r) => r.student_id));
+      const blankPupils = roster.filter((st: any) => {
+        const count = ratings.filter((r) => r.term_id === term.id && r.student_id === st.id).length;
+        return count < expected;
       });
-    }
-  }
-
-  private coverageWarnings(
-    kind: 'mid_term' | 'end_of_term',
-    subjects: ReportSubject[],
-    assessments: ReportAssessment[],
-    termName: string,
-    issues: Issue[],
-  ) {
-    const noCat = subjects.filter((s) => !assessments.some((a) => a.subject_id === s.id && a.category !== 'exam'));
-    if (noCat.length) {
-      issues.push({ level: 'warning', message: `No quiz or homework submitted in ${termName} for ${noCat.map((s) => s.name).join(', ')}` });
-    }
-    if (kind === 'end_of_term') {
-      const noExam = subjects.filter((s) => !assessments.some((a) => a.subject_id === s.id && a.category === 'exam'));
-      if (noExam.length) {
-        issues.push({ level: 'warning', message: `No exam submitted in ${termName} for ${noExam.map((s) => s.name).join(', ')}` });
-      }
-    }
-  }
-
-  /** End of year: each term's subject total side by side, then the annual total. */
-  private async buildYearLines(
-    classId: number,
-    subjects: ReportSubject[],
-    roster: { id: number }[],
-    terms: TermRow[],
-    issues: Issue[],
-  ) {
-    const perTerm = [];
-    for (const term of terms) {
-      const data = await this.termMarks(classId, term.id);
-      this.draftWarnings(data.drafts, term.name, issues);
-      this.coverageWarnings('end_of_term', subjects, data.assessments, term.name, issues);
-      if (term.status !== 'closed') {
-        issues.push({ level: 'warning', message: `${term.name} is not closed yet, so its marks may still change` });
-      }
-      perTerm.push({ term, ...data });
-    }
-
-    const lines = new Map<number, SubjectLine[]>();
-    for (const st of roster) {
-      const termResults = perTerm.map((t) =>
-        computeTermSubjects('end_of_term', subjects, t.assessments, t.marks, st.id));
-      lines.set(st.id, subjects.map((s, i) => {
-        const termCells: ReportCell[] = termResults.map((results, ti) => {
-          const r = results[i];
-          const flags: CellFlag[] = [...r.tj.flags, ...(r.exam?.flags ?? [])]
-            .map((f) => ({ ...f, message: `${perTerm[ti].term.name}: ${f.message}` }));
-          if (perTerm[ti].term.status !== 'closed') {
-            flags.push({ code: 'term_incomplete', message: `${perTerm[ti].term.name} is not closed` });
-          }
-          return { value: r.tot.value, max: r.tot.max, flags };
+      if (blankPupils.length && !filled.size) {
+        issues.push({ level: 'warning', message: `No colours recorded in ${term.name}` });
+      } else if (blankPupils.length) {
+        issues.push({
+          level: 'warning',
+          message: `${blankPupils.length} pupil${blankPupils.length === 1 ? ' has' : 's have'} a blank colour in ${term.name}`,
         });
-        const { total, max } = sumCells(termCells);
-        return {
-          subject_id: s.id, name: s.name, code: s.code, group: s.group, max: s.max,
-          terms: termCells,
-          tot: s.max === null ? { value: null, max: null, flags: [] } : { value: total, max, flags: [] },
-        };
-      }));
+      }
     }
-    return lines;
+
+    const students = roster.map((st: any) => {
+      const termBlocks = [1, 2, 3].map((sequence) => {
+        const term = terms.find((t) => t.sequence === sequence);
+        const mine = term ? ratings.filter((r) => r.term_id === term.id && r.student_id === st.id) : [];
+        const byCode: Record<string, string | null> = {};
+        for (const subject of NURSERY_SUBJECTS) {
+          byCode[subject.code] = mine.find((r) => r.subject_code === subject.code)?.rating ?? null;
+        }
+        const observation = term
+          ? observations.find((o) => o.term_id === term.id && o.student_id === st.id)?.observation ?? ''
+          : '';
+        return { sequence, name: term?.name ?? `Term ${sequence}`, ratings: byCode, observation };
+      });
+      const blanks = openTerms.reduce((n, term) => {
+        const block = termBlocks.find((b) => b.sequence === term.sequence);
+        return n + Object.values(block?.ratings ?? {}).filter((v) => !v).length;
+      }, 0);
+      const recorded = termBlocks.reduce((n, b) => n + Object.values(b.ratings).filter(Boolean).length, 0);
+      const decision = decisions.find((d) => d.student_id === st.id)?.decision ?? null;
+      const flags = blanks ? [`${blanks} colour${blanks === 1 ? '' : 's'} still blank`] : [];
+      return {
+        student_id: st.id,
+        name: st.name,
+        student_id_number: st.student_id_number,
+        subjects: [] as { points: MarkCell }[],
+        nursery: { terms: termBlocks, decision },
+        total: recorded,
+        max_total: expected * Math.max(openTerms.length, 1),
+        percentage: null,
+        position: null,
+        class_size: roster.length,
+        flagged_count: blanks,
+        flags,
+      };
+    });
+
+    return {
+      header: {
+        layout: 'nursery' as const,
+        kind: 'nursery' as const,
+        kind_label: KIND_LABELS.nursery,
+        country: 'REPUBLIQUE DU RWANDA',
+        ministry: "MINISTERE DE L'EDUCATION",
+        city: 'VILLE DE KIGALI',
+        district: 'DISTRICT DE NYARUGENGE',
+        sector: 'SECTEUR DE NYAMIRAMBO',
+        school: 'JERICHO SCHOOL',
+        phone: '0788695562',
+        email: 'jericho.school@yahoo.fr',
+        title: 'BULLETIN SCOLAIRE DE LA MATERNELLE',
+        academic_year: cls.academic_year_name,
+        date: kigaliToday(),
+        term: null,
+        terms: terms.map((t) => ({ id: t.id, name: t.name, sequence: t.sequence, status: t.status })),
+        areas: NURSERY_AREAS,
+        class: {
+          id: cls.id,
+          label: nurseryClassTitle(cls.p_level_name, cls.name),
+          p_level: cls.p_level_name,
+          p_level_id: cls.p_level_id,
+          band: cls.band,
+        },
+        class_teacher: cls.class_teacher_name ?? null,
+      },
+      issues,
+      can_generate: !issues.some((i) => i.level === 'blocking'),
+      students,
+    };
   }
 
-  // ─── Endpoints ───────────────────────────────────────────────────────────────
-
-  /** Classes of the active year by section, with how many reports exist for the chosen period. */
   async listClasses(kind: ReportKind, termId?: number) {
+    const printed = this.assertKind(kind);
     const year = await this.activeYear();
     if (!year) return { academic_year: null, terms: [], sections: [] };
     const terms = await this.db.query(
@@ -371,7 +332,10 @@ export class ReportsService {
        FROM terms WHERE academic_year_id = $1 ORDER BY sequence ASC`,
       [year.id],
     );
-    if (kind !== 'end_of_year' && termId && !terms.some((t: any) => t.id === termId)) {
+    if (printed === 'mid_term' && !termId) {
+      return { academic_year: year, terms, sections: [] };
+    }
+    if (printed === 'mid_term' && termId && !terms.some((t: any) => t.id === termId)) {
       throw new BadRequestException('That term belongs to a different academic year');
     }
 
@@ -389,25 +353,30 @@ export class ReportsService {
        LEFT JOIN users u ON u.id = c.teacher_id
        WHERE pl.academic_year_id = $1 AND c.status = 'active' AND c.distributed_at IS NOT NULL
        ORDER BY pl.name ASC, c.name ASC`,
-      [year.id, kind, kind === 'end_of_year' ? null : termId ?? null],
+      [year.id, printed, printed === 'nursery' ? null : termId ?? null],
     );
 
-    const sections = SCHOOL_BANDS.map((b) => ({
+    const bands = SCHOOL_BANDS.filter((b) => (b.key === 'nursery') === (printed === 'nursery'));
+    const sections = bands.map((b) => ({
       key: b.key,
       label: b.label,
       classes: classes
         .filter((c) => bandOf(c.p_level_name) === b.key)
-        .map((c) => ({ ...c, label: `${c.p_level_name}${c.name}` })),
+        .map((c) => ({
+          ...c,
+          label: printed === 'nursery' ? nurseryClassTitle(c.p_level_name, c.name) : `${c.p_level_name}${c.name}`,
+        })),
     }));
     return { academic_year: year, terms, sections };
   }
 
   async preview(classId: number, kind: ReportKind, termId?: number) {
-    const built = await this.buildClass(classId, kind, termId);
+    const printed = this.assertKind(kind);
+    const built = await this.buildClass(classId, printed, termId);
     const stored: any[] = await this.db.query(
       `SELECT student_id, generated_at FROM report_cards
        WHERE class_id = $1 AND kind = $2 AND term_id IS NOT DISTINCT FROM $3::int`,
-      [classId, kind, kind === 'end_of_year' ? null : termId ?? null],
+      [classId, printed, printed === 'nursery' ? null : termId ?? null],
     );
     const generatedAt = new Map(stored.map((r) => [r.student_id, r.generated_at]));
     return {
@@ -420,8 +389,9 @@ export class ReportsService {
     dto: { class_id: number; kind: ReportKind; term_id?: number; student_ids?: number[]; confirm_incomplete: boolean },
     user: User,
   ) {
-    const termId = dto.kind === 'end_of_year' ? undefined : dto.term_id;
-    const built = await this.buildClass(dto.class_id, dto.kind, termId);
+    const printed = this.assertKind(dto.kind);
+    const termId = printed === 'nursery' ? undefined : dto.term_id;
+    const built = await this.buildClass(dto.class_id, printed, termId);
 
     const blocking = built.issues.filter((i) => i.level === 'blocking');
     if (blocking.length) {
@@ -433,17 +403,17 @@ export class ReportsService {
       const byId = new Map(built.students.map((s) => [s.student_id, s]));
       const outside = dto.student_ids.filter((id) => !byId.has(id));
       if (outside.length) {
-        throw new BadRequestException(`${outside.length} selected student${outside.length === 1 ? ' is' : 's are'} not in this class`);
+        throw new BadRequestException(`${outside.length} selected pupil${outside.length === 1 ? ' is' : 's are'} not in this class`);
       }
-      chosen = dto.student_ids.map((id) => byId.get(id) as StudentReport);
+      chosen = dto.student_ids.map((id) => byId.get(id)!);
     }
-    if (!chosen.length) throw new BadRequestException('Select at least one student');
+    if (!chosen.length) throw new BadRequestException('Select at least one pupil');
 
     const flagged = chosen.filter((s) => s.flagged_count > 0).length;
     const warnings = built.issues.filter((i) => i.level === 'warning').length;
     if ((flagged || warnings) && !dto.confirm_incomplete) {
       throw new BadRequestException(
-        `${flagged} report${flagged === 1 ? ' has' : 's have'} flagged cells and there ${warnings === 1 ? 'is 1 warning' : `are ${warnings} warnings`}. Review them and confirm to generate anyway.`,
+        `${flagged} report${flagged === 1 ? ' has' : 's have'} blank cells and there ${warnings === 1 ? 'is 1 warning' : `are ${warnings} warnings`}. Review them and confirm to generate anyway.`,
       );
     }
 
@@ -461,6 +431,7 @@ export class ReportsService {
           header: built.header,
           student: { id: s.student_id, name: s.name, student_id_number: s.student_id_number },
           subjects: s.subjects,
+          nursery: s.nursery,
           total: s.total,
           max_total: s.max_total,
           percentage: s.percentage,
@@ -482,7 +453,7 @@ export class ReportsService {
              position = EXCLUDED.position, class_size = EXCLUDED.class_size,
              generated_by = EXCLUDED.generated_by, generated_at = now()`,
           [
-            s.student_id, dto.class_id, yearId, termId ?? null, dto.kind, JSON.stringify(payload),
+            s.student_id, dto.class_id, yearId, termId ?? null, printed, JSON.stringify(payload),
             s.flagged_count, s.total, s.max_total, s.percentage, s.position, s.class_size, user.id,
           ],
         );
@@ -491,13 +462,13 @@ export class ReportsService {
 
     return {
       generated: chosen.length,
-      flagged: flagged,
-      message: `Generated ${chosen.length} report${chosen.length === 1 ? '' : 's'} for ${built.header.class.label}`,
+      flagged,
+      message: `Generated ${chosen.length} ${KIND_LABELS[printed].toLowerCase()} report${chosen.length === 1 ? '' : 's'} for ${built.header.class.label}`,
     };
   }
 
-  /** Stored reports for printing, in roster order. Students who left the class are not printed. */
   async cards(classId: number, kind: ReportKind, termId?: number) {
+    const printed = this.assertKind(kind);
     const cls = await this.loadClass(classId);
     const rows: any[] = await this.db.query(
       `SELECT rc.id, rc.student_id, rc.payload, rc.generated_at
@@ -506,18 +477,17 @@ export class ReportsService {
        WHERE rc.class_id = $1 AND rc.kind = $2 AND rc.term_id IS NOT DISTINCT FROM $3::int
          AND st.current_class_id = $1 AND st.status::text <> 'transferred'
        ORDER BY st.name ASC`,
-      [classId, kind, kind === 'end_of_year' ? null : termId ?? null],
+      [classId, printed, printed === 'nursery' ? null : termId ?? null],
     );
     return {
       class: { id: cls.id, label: cls.label },
-      kind,
+      kind: printed,
       cards: rows.map((r) => ({ ...r.payload, id: r.id, generated_at: r.generated_at })),
     };
   }
 
-  // ─── Report maxima per subject ───────────────────────────────────────────────
-
   async levelSubjects(pLevelId: number) {
+    await ensureBulletinSubjects(this.db);
     const level = await this.db.query(`SELECT id, name FROM p_levels WHERE id = $1`, [pLevelId]);
     if (!level.length) throw new NotFoundException('Level not found');
     const rows: any[] = await this.db.query(
@@ -541,7 +511,6 @@ export class ReportsService {
       seen.add(s.id);
       if (!ids.has(s.id)) throw new BadRequestException(`Subject ${s.id} is not taught at ${current.p_level.name}`);
     }
-
     await this.db.transaction(async (manager) => {
       for (const s of dto.subjects) {
         const sets: string[] = [];

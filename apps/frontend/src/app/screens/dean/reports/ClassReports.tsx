@@ -1,4 +1,4 @@
-import { AlertTriangle, CheckCircle2, Eye, FileCheck2, Loader2, OctagonX, Printer, Settings2 } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Eye, FileCheck2, Loader2, OctagonX, Printer } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useSearchParams } from "react-router";
 import { toast } from "sonner";
@@ -11,11 +11,10 @@ import {
 } from "../../../components/ui/dialog";
 import { PrintCards } from "./PrintCards";
 import { CardData, fmt, ReportCard, ReportHeader, SubjectLine } from "./ReportCard";
-import { isKind, KINDS } from "./ReportsHome";
-import { SubjectMaximaDialog } from "./SubjectMaximaDialog";
 
 interface PreviewStudent {
   student_id: number; name: string; student_id_number: string | null; subjects: SubjectLine[];
+  nursery?: CardData["nursery"];
   total: number; max_total: number; percentage: number | null; position: number | null; class_size: number;
   flagged_count: number; flags: string[]; generated_at: string | null;
 }
@@ -29,7 +28,7 @@ interface Preview {
 const asCard = (p: Preview, s: PreviewStudent): CardData => ({
   header: p.header,
   student: { id: s.student_id, name: s.name, student_id_number: s.student_id_number },
-  subjects: s.subjects, total: s.total, max_total: s.max_total, percentage: s.percentage,
+  subjects: s.subjects, nursery: s.nursery, total: s.total, max_total: s.max_total, percentage: s.percentage,
   position: s.position, class_size: s.class_size, flagged_count: s.flagged_count, flags: s.flags,
 });
 
@@ -37,9 +36,10 @@ export function ClassReports() {
   const { classId = "" } = useParams();
   const [params] = useSearchParams();
   const kindParam = params.get("kind");
-  const kind = isKind(kindParam) ? kindParam : null;
+  const kind = kindParam === "nursery" || kindParam === "mid_term" ? kindParam : null;
   const term = params.get("term");
-  const validLink = /^\d{1,10}$/.test(classId) && !!kind && (kind === "end_of_year" || (!!term && /^\d{1,10}$/.test(term)));
+  const nursery = kind === "nursery";
+  const validLink = /^\d{1,10}$/.test(classId) && !!kind && (nursery || (!!term && /^\d{1,10}$/.test(term)));
 
   const [data, setData] = useState<Preview | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -50,10 +50,9 @@ export function ClassReports() {
   const [generating, setGenerating] = useState(false);
   const [printing, setPrinting] = useState<CardData[] | null>(null);
   const [loadingPrint, setLoadingPrint] = useState(false);
-  const [maxima, setMaxima] = useState(false);
 
-  const query = kind === "end_of_year" ? `kind=${kind}` : `kind=${kind}&term_id=${term}`;
-  const back = `/dean/reports?kind=${kind ?? "end_of_term"}${kind !== "end_of_year" && term ? `&term=${term}` : ""}`;
+  const query = nursery ? "kind=nursery" : `kind=mid_term&term_id=${term}`;
+  const back = nursery ? "/dean/reports" : `/dean/reports${term ? `?term=${term}` : ""}`;
 
   const load = useCallback(async () => {
     setError(null);
@@ -98,7 +97,7 @@ export function ClassReports() {
       const res = await api.post<{ message: string }>("/api/v1/academics/reports/generate", {
         class_id: Number(classId),
         kind,
-        ...(kind === "end_of_year" ? {} : { term_id: Number(term) }),
+        ...(nursery ? {} : { term_id: Number(term) }),
         ...(whole ? {} : { student_ids: confirmFor }),
         confirm_incomplete: needsAck && acknowledged,
       });
@@ -135,7 +134,7 @@ export function ClassReports() {
   if (!data) return <Loading label="Building reports…" />;
 
   const h = data.header;
-  const kindLabel = KINDS.find((k) => k.value === kind)?.label ?? "";
+  const kindLabel = nursery ? "Nursery bulletin" : "Mid-term";
 
   return (
     <div className="space-y-6">
@@ -144,7 +143,6 @@ export function ClassReports() {
         subtitle={`${h.term ? `${h.term.name} · ` : ""}${h.academic_year} · ${data.students.length} pupils · class teacher ${h.class_teacher ?? "not set"}`}
         actions={
           <>
-            <Button variant="outline" onClick={() => setMaxima(true)}><Settings2 size={16} className="mr-1.5" /> Report maxima</Button>
             <Button variant="outline" onClick={printClass} disabled={loadingPrint || generatedCount === 0}>
               {loadingPrint ? <Loader2 size={16} className="mr-1.5 animate-spin" /> : <Printer size={16} className="mr-1.5" />}
               Print class ({generatedCount})
@@ -196,9 +194,9 @@ export function ClassReports() {
               <tr className="text-left" style={{ backgroundColor: "var(--light-gray)", color: "var(--mid-gray)" }}>
                 <th className="px-3 py-3 w-10" />
                 <th className="px-3 py-3 font-medium">Pupil</th>
-                <th className="px-3 py-3 font-medium text-right">Total</th>
-                <th className="px-3 py-3 font-medium text-right">%</th>
-                <th className="px-3 py-3 font-medium text-right hidden sm:table-cell">Place</th>
+                <th className="px-3 py-3 font-medium text-right">{nursery ? "Recorded" : "Total"}</th>
+                {!nursery && <th className="px-3 py-3 font-medium text-right">%</th>}
+                {!nursery && <th className="px-3 py-3 font-medium text-right hidden sm:table-cell">Place</th>}
                 <th className="px-3 py-3 font-medium">Check</th>
                 <th className="px-3 py-3 font-medium hidden md:table-cell">Generated</th>
                 <th className="px-3 py-3 w-24" />
@@ -215,8 +213,8 @@ export function ClassReports() {
                     {s.student_id_number && <div className="text-xs" style={{ color: "var(--mid-gray)" }}>{s.student_id_number}</div>}
                   </td>
                   <td className="px-3 py-2.5 text-right tabular-nums" style={{ color: "var(--dark-gray)" }}>{fmt(s.total)}<span style={{ color: "var(--mid-gray)" }}>/{fmt(s.max_total)}</span></td>
-                  <td className="px-3 py-2.5 text-right tabular-nums" style={{ color: "var(--dark-gray)" }}>{s.percentage === null ? "—" : s.percentage.toFixed(1)}</td>
-                  <td className="px-3 py-2.5 text-right tabular-nums hidden sm:table-cell" style={{ color: "var(--dark-gray)" }}>{s.position ?? "—"}</td>
+                  {!nursery && <td className="px-3 py-2.5 text-right tabular-nums" style={{ color: "var(--dark-gray)" }}>{s.percentage === null ? "—" : `${s.percentage.toFixed(2)}%`}</td>}
+                  {!nursery && <td className="px-3 py-2.5 text-right tabular-nums hidden sm:table-cell" style={{ color: "var(--dark-gray)" }}>{s.position ?? "—"}</td>}
                   <td className="px-3 py-2.5">
                     {!data.can_generate ? <span className="text-xs" style={{ color: "var(--mid-gray)" }}>—</span> : s.flagged_count > 0 ? (
                       <span className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full"
@@ -250,7 +248,9 @@ export function ClassReports() {
             <DialogTitle>Review · {review?.name}</DialogTitle>
             <DialogDescription>
               {review && review.flagged_count > 0
-                ? `${review.flagged_count} cell${review.flagged_count === 1 ? " is" : "s are"} outlined in red. Hover a cell to see why; blanks count as zero.`
+                ? nursery
+                  ? `${review.flagged_count} colour${review.flagged_count === 1 ? " is" : "s are"} still blank. Empty boxes print empty.`
+                  : `${review.flagged_count} mark${review.flagged_count === 1 ? " is" : "s are"} blank and will print as zero.`
                 : "Every cell is complete."}
             </DialogDescription>
           </DialogHeader>
@@ -295,7 +295,7 @@ export function ClassReports() {
               </div>
               <label className="flex items-start gap-2 text-sm cursor-pointer" style={{ color: "var(--dark-gray)" }}>
                 <Checkbox checked={acknowledged} onCheckedChange={(v) => setAcknowledged(v === true)} className="mt-0.5" />
-                I have reviewed the flagged cells and want to generate anyway. Blank marks will print as zero.
+                I have reviewed the blanks and want to generate anyway. A blank mid-term mark prints as zero. A blank nursery colour stays empty.
               </label>
             </div>
           ) : (
@@ -309,8 +309,6 @@ export function ClassReports() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      <SubjectMaximaDialog open={maxima} onOpenChange={setMaxima} pLevelId={h.class.p_level_id} levelName={h.class.p_level} onSaved={load} />
 
       {printing && <PrintCards cards={printing} onDone={onPrintDone} />}
     </div>

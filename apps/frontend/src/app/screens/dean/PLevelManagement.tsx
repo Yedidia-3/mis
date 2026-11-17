@@ -210,7 +210,7 @@ export function PLevelManagement() {
             <div>
               <p className="font-semibold" style={{ color: 'var(--dark-gray)' }}>Update all class lists</p>
               <p className="text-sm mt-1" style={{ color: 'var(--mid-gray)' }}>
-                Drop every class Excel file at once. Each file is matched by its Class line, such as P1-A or P4D. The list columns become the columns in the file.
+                Drop every class Excel file at once. Each file replaces that class, such as P1-A or P4D. Pupils who are not on the file are taken off the list. Classes you do not drop, such as nursery, stay as they are.
               </p>
             </div>
             <Button asChild style={{ backgroundColor: 'var(--maroon)', color: '#fff' }}>
@@ -370,7 +370,7 @@ export function PLevelManagement() {
       <Dialog open={!!importPreview} onOpenChange={(open) => { if (!open) { setImportPreview(null); setImportFiles([]); } }}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>Update these class lists</DialogTitle>
+            <DialogTitle>Replace these class lists</DialogTitle>
             <DialogDescription>{importPreview?.message}</DialogDescription>
           </DialogHeader>
           <div className="max-h-80 overflow-auto space-y-3 text-sm" style={{ color: 'var(--dark-gray)' }}>
@@ -387,7 +387,7 @@ export function PLevelManagement() {
             <Button variant="ghost" onClick={() => { setImportPreview(null); setImportFiles([]); }} disabled={importing}>Cancel</Button>
             <Button onClick={confirmClassLists} disabled={importing || !(importPreview?.results ?? []).some((item: any) => !item.error)} style={{ backgroundColor: 'var(--maroon)', color: '#fff' }}>
               {importing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Update class lists
+              Replace class lists
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -406,7 +406,7 @@ export function PLevelManagement() {
                 <p style={{ color: item.error ? 'var(--danger-red)' : 'var(--dark-gray)' }}>{item.error || item.message}</p>
                 {!item.error && (
                   <p style={{ color: 'var(--mid-gray)' }}>
-                    {item.new_count ?? 0} added, {item.already_in_class ?? 0} already in the class, {item.already_elsewhere ?? 0} already in another class.
+                    {item.on_file ?? 0} on the file, {item.removed_count ?? 0} taken off.
                     {item.headers?.length ? ` Columns: ${item.headers.join(', ')}.` : ''}
                   </p>
                 )}

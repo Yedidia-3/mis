@@ -101,6 +101,102 @@ export class ScoreEntryDto {
   is_absent?: boolean;
 }
 
+export class RecordingScoreDto {
+  @IsInt()
+  @Min(1)
+  @Max(RULES.ID_MAX)
+  student_id: number;
+
+  @IsInt()
+  @Min(1)
+  @Max(RULES.ID_MAX)
+  subject_id: number;
+
+  @IsOptional()
+  @IsNumber(NUMBER_OPTS, { message: 'A mark must be a number with at most 2 decimal places' })
+  @Min(0)
+  @Max(RULES.SCORE_MAX)
+  score?: number | null;
+}
+
+export class RecordingRatingDto {
+  @IsInt()
+  @Min(1)
+  @Max(RULES.ID_MAX)
+  student_id: number;
+
+  @IsString()
+  @Length(1, 32)
+  subject_code: string;
+
+  @IsOptional()
+  @IsIn(['excellent', 'tres_bon', 'bon', 'assez_bon'])
+  rating?: 'excellent' | 'tres_bon' | 'bon' | 'assez_bon' | null;
+}
+
+export class RecordingObservationDto {
+  @IsInt()
+  @Min(1)
+  @Max(RULES.ID_MAX)
+  student_id: number;
+
+  @IsOptional()
+  @IsString()
+  @Length(0, 100)
+  observation?: string | null;
+}
+
+export class RecordingDecisionDto {
+  @IsInt()
+  @Min(1)
+  @Max(RULES.ID_MAX)
+  student_id: number;
+
+  @IsOptional()
+  @IsIn(['promu', 'redoublement', 'renvoye'])
+  decision?: 'promu' | 'redoublement' | 'renvoye' | null;
+}
+
+export class SaveRecordingDto {
+  @IsInt()
+  @Min(1)
+  @Max(RULES.ID_MAX)
+  class_id: number;
+
+  @IsInt()
+  @Min(1)
+  @Max(RULES.ID_MAX)
+  term_id: number;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(5000)
+  @ValidateNested({ each: true })
+  @Type(() => RecordingScoreDto)
+  scores?: RecordingScoreDto[];
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(5000)
+  @ValidateNested({ each: true })
+  @Type(() => RecordingRatingDto)
+  ratings?: RecordingRatingDto[];
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(400)
+  @ValidateNested({ each: true })
+  @Type(() => RecordingObservationDto)
+  observations?: RecordingObservationDto[];
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(400)
+  @ValidateNested({ each: true })
+  @Type(() => RecordingDecisionDto)
+  decisions?: RecordingDecisionDto[];
+}
+
 export class SaveScoresDto {
   @IsArray()
   @ArrayMinSize(1)

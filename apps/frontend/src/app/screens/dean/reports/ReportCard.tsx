@@ -1,17 +1,29 @@
 import "../../../../styles/report-card.css";
-import { Fragment } from "react";
-import logo from "../../../../assets/images/official-logo.png";
 
 export interface Cell { value: number | null; max: number | null; flags: { code: string; message: string }[] }
 export interface SubjectLine {
-  subject_id: number; name: string; code: string; group: string | null; max: number | null;
-  tj?: Cell; exam?: Cell | null; terms?: Cell[]; tot: Cell;
+  subject_id: number; name: string; code: string; max: number | null;
+  points?: Cell;
+}
+export interface NurseryTerm {
+  sequence: number; name: string; observation: string;
+  ratings: Record<string, string | null>;
 }
 export interface ReportHeader {
-  country: string; ministry: string; city: string; district: string; sector: string; school: string;
-  phone: string; email: string; kind: "mid_term" | "end_of_term" | "end_of_year"; kind_label: string;
-  academic_year: string; term: { id: number; name: string; sequence?: number; status: string } | null;
+  layout?: "french" | "english" | "nursery";
+  kind: string; kind_label: string;
+  country?: string; ministry?: string; city?: string; district?: string; sector?: string;
+  school?: string; phone?: string; email?: string;
+  title?: string;
+  academic_year: string;
+  date?: string;
+  year_label?: string; class_label?: string; level_label?: string; level_value?: string;
+  name_label?: string; course_label?: string; period_label?: string;
+  max_label?: string; points_label?: string; total_label?: string; percentage_label?: string;
+  place_label?: string; parent_sign?: string; teacher_sign?: string; done_at?: string; date_label?: string;
+  term: { id: number; name: string; sequence?: number; status: string } | null;
   terms: { id: number; name: string; sequence: number; status: string }[];
+  areas?: { code: string; title: string; subjects: { code: string; name: string }[] }[];
   class: { id: number; label: string; p_level: string; p_level_id: number; band: string | null };
   class_teacher: string | null;
 }
@@ -19,45 +31,38 @@ export interface CardData {
   header: ReportHeader;
   student: { id: number; name: string; student_id_number: string | null };
   subjects: SubjectLine[];
+  nursery?: { terms: NurseryTerm[]; decision: string | null } | null;
   total: number; max_total: number; percentage: number | null; position: number | null; class_size: number;
-  flagged_count: number; flags: string[]; generated_by?: string | null; generated_at?: string | null;
+  flagged_count: number; flags: string[];
 }
 
-const ROMAN = ["", "I", "II", "III"];
-const ORDINAL = ["", "PREMIER", "DEUXIEME", "TROISIEME"];
+const RATING_CLASS: Record<string, string> = {
+  excellent: "nu-excellent",
+  tres_bon: "nu-tres",
+  bon: "nu-bon",
+  assez_bon: "nu-assez",
+};
 
-export const fmt = (n: number | null | undefined) =>
-  n === null || n === undefined ? "" : Number.isInteger(n) ? String(n) : String(Math.round(n * 10) / 10);
+export const fmt = (n: number | null | undefined) => {
+  if (n === null || n === undefined) return "";
+  const rounded = Math.round(n * 100) / 100;
+  return Number.isInteger(rounded) ? String(rounded) : String(rounded);
+};
 
-/** Subjects in report order, each group (ENGLISH, FRANÇAIS…) kept together under its heading row. */
-function grouped(subjects: SubjectLine[]) {
-  const out: { group: string | null; items: SubjectLine[] }[] = [];
-  for (const s of subjects) {
-    const last = out[out.length - 1];
-    if (s.group && last && last.group === s.group) last.items.push(s);
-    else out.push({ group: s.group, items: [s] });
-  }
-  return out;
-}
+const dmy = (iso?: string | null) => {
+  if (!iso) return "";
+  const [y, m, d] = iso.slice(0, 10).split("-");
+  return d && m && y ? `${d}/${m}/${y}` : iso;
+};
 
-/**
- * One pupil's bulletin, laid out as the school's "School Report" sheet: the
- * authority block and year/class/term on top, BULLETIN SCOLAIRE, the pupil's
- * name, then COURS | MAXIMUM (TJ EXAM TOT) | period (TJ EXAM TOT), TOTAL,
- * POURCENTAGE, PLACE … Sur …, and the signature rows, under the school logo.
- *
- * With highlightFlags the cells that were zeroed or guessed are outlined and
- * titled with the reason, for the dean's review; printed copies never show it.
- */
 export function ReportCard({ card, highlightFlags = false }: { card: CardData; highlightFlags?: boolean }) {
-  const h = card.header;
-  const yearly = h.kind === "end_of_year";
-  const seq = h.term?.sequence ?? h.terms.find((t) => t.id === h.term?.id)?.sequence ?? Number(h.term?.name.match(/\d/)?.[0] ?? 0);
-  const trimestre = yearly ? "ANNUEL" : ROMAN[seq] ?? h.term?.name ?? "";
-  const period = yearly ? "ANNUEL" : h.kind === "mid_term" ? "MI-TRIMESTRE" : `${ORDINAL[seq] ?? ""} TRIMESTRE`.trim();
-  const yearTerms = [...h.terms].sort((a, b) => a.sequence - b.sequence);
+  if (card.header.layout === "nursery" || card.header.kind === "nursery") return <NurseryCard card={card} />;
+  return <MidtermCard card={card} highlightFlags={highlightFlags} />;
+}
 
-  const value = (c: Cell | null | undefined) => {
+function MidtermCard({ card, highlightFlags }: { card: CardData; highlightFlags: boolean }) {
+  const h = card.header;
+  const value = (c: Cell | undefined) => {
     const flagged = highlightFlags && !!c && c.flags.length > 0;
     return (
       <td className={`rc-v${flagged ? " rc-flag" : ""}`} title={flagged ? c!.flags.map((f) => f.message).join("\n") : undefined}>
@@ -65,10 +70,8 @@ export function ReportCard({ card, highlightFlags = false }: { card: CardData; h
       </td>
     );
   };
-
   return (
     <article className="report-card">
-      <img src={logo} alt="Jericho School" className="rc-logo" />
       <header className="rc-head">
         <div className="rc-left">
           <div>{h.country}</div>
@@ -81,106 +84,165 @@ export function ReportCard({ card, highlightFlags = false }: { card: CardData; h
           <div>EMAIL: {h.email}</div>
         </div>
         <div className="rc-right">
-          <div>ANNEE SCOLAIRE&nbsp;: {h.academic_year}</div>
-          <div />
-          <div />
-          <div className="rc-pair"><span>CLASSE:</span><span>{h.class.label}</span></div>
-          <div />
-          <div />
-          <div>TRIMESTRE: {trimestre}</div>
-          <div />
+          <div>{h.year_label} {h.academic_year}</div>
+          <div className="rc-pair"><span>{h.class_label}</span><span>{h.class.label}</span></div>
+          <div className="rc-pair"><span>{h.level_label}</span><span>{h.level_value}</span></div>
         </div>
       </header>
-
-      <div className="rc-title"><span>BULLETIN SCOLAIRE</span></div>
-
+      <div className="rc-title"><span>{h.title}</span></div>
       <div className="rc-name">
-        <span className="rc-name-label">NOM ET PRENOM</span>
+        <span className="rc-name-label">{h.name_label}</span>
         <span className="rc-name-value">{card.student.name}</span>
       </div>
-
-      <table className="rc-table">
+      <table className="rc-table rc-mid">
         <colgroup>
-          <col style={{ width: "33.6%" }} />
-          <col style={{ width: "8%" }} /><col style={{ width: "11.7%" }} /><col style={{ width: "7.5%" }} />
-          <col style={{ width: "10.7%" }} /><col style={{ width: "13.1%" }} /><col style={{ width: "15.4%" }} />
+          <col style={{ width: "46%" }} />
+          <col style={{ width: "27%" }} />
+          <col style={{ width: "27%" }} />
         </colgroup>
         <thead>
           <tr>
-            <th rowSpan={2} className="rc-course">COURS</th>
-            <th colSpan={yearly ? 2 : 3} className="rc-max">MAXIMUM</th>
-            <th colSpan={yearly ? 4 : 3}>{period}</th>
+            <th className="rc-course">{h.course_label}</th>
+            <th colSpan={2}>{h.period_label}</th>
           </tr>
           <tr>
-            {yearly ? (
-              <>
-                <th className="rc-max">TRIM</th><th className="rc-max">ANNUEL</th>
-                {[1, 2, 3].map((n) => <th key={n}>{ROMAN[n]}</th>)}<th>TOT</th>
-              </>
-            ) : (
-              <>
-                <th className="rc-max">TJ</th><th className="rc-max">EXAM</th><th className="rc-max">TOT</th>
-                <th>TJ</th><th>EXAM</th><th>TOT</th>
-              </>
-            )}
+            <th />
+            <th className="rc-max">{h.max_label}</th>
+            <th>{h.points_label}</th>
           </tr>
         </thead>
         <tbody>
-          {grouped(card.subjects).map((g, gi) => (
-            <Fragment key={gi}>
-              {g.group && (
-                <tr className="rc-group"><td className="rc-course" colSpan={7}>{g.group.toUpperCase()}</td></tr>
-              )}
-              {g.items.map((s) => (
-                <tr key={s.subject_id}>
-                  <td className={`rc-course${g.group ? " rc-sub" : ""}`}>{s.name.toUpperCase()}</td>
-                  {yearly ? (
-                    <>
-                      <td className="rc-max">{fmt(s.terms?.[0]?.max)}</td>
-                      <td className="rc-max">{fmt(s.tot.max)}</td>
-                      {yearTerms.map((t, i) => <Fragment key={t.id}>{value(s.terms?.[i])}</Fragment>)}
-                      <td className="rc-v">{fmt(s.tot.value)}</td>
-                    </>
-                  ) : (
-                    <>
-                      <td className="rc-max">{fmt(s.max)}</td>
-                      <td className="rc-max">{fmt(s.max)}</td>
-                      <td className="rc-max">{fmt(s.tot.max)}</td>
-                      {value(s.tj)}
-                      {value(s.exam)}
-                      <td className="rc-v">{fmt(s.tot.value)}</td>
-                    </>
-                  )}
-                </tr>
-              ))}
-            </Fragment>
-          ))}
-          <tr className="rc-foot">
-            <td className="rc-course">TOTAL</td>
-            <td className="rc-max rc-center" colSpan={yearly ? 2 : 3}>{fmt(card.max_total)}</td>
-            <td className="rc-right-num" colSpan={yearly ? 4 : 3}>{fmt(card.total)}</td>
-          </tr>
-          <tr className="rc-foot">
-            <td className="rc-course">POURCENTAGE</td>
-            <td className="rc-max" colSpan={yearly ? 2 : 3} />
-            <td className="rc-right-num" colSpan={yearly ? 4 : 3}>{card.percentage === null ? "" : card.percentage.toFixed(1)}</td>
-          </tr>
-          <tr className="rc-foot">
-            <td className="rc-course">PLACE</td>
-            <td className="rc-max" colSpan={yearly ? 2 : 3} />
-            {yearly && <td className="rc-place-pad" />}
-            <td className="rc-place">{card.position ?? ""}</td>
-            <td className="rc-place rc-sur">Sur</td>
-            <td className="rc-place">{card.class_size}</td>
-          </tr>
-          {["SIGNATURE DES PARENTS", "SIGNATURE DU MAÎTRE", "OBSERVATION"].map((label) => (
-            <tr key={label} className="rc-sign">
-              <td className="rc-course">{label}</td>
-              <td colSpan={6} />
+          {card.subjects.map((s) => (
+            <tr key={s.subject_id}>
+              <td className="rc-course">{s.name}</td>
+              <td className="rc-max">{fmt(s.max)}</td>
+              {value(s.points)}
             </tr>
           ))}
+          <tr className="rc-foot">
+            <td className="rc-course">{h.total_label}</td>
+            <td className="rc-max">{fmt(card.max_total)}</td>
+            <td className="rc-v">{fmt(card.total)}</td>
+          </tr>
+          <tr className="rc-foot">
+            <td className="rc-course">{h.percentage_label}</td>
+            <td className="rc-right-num" colSpan={2}>{card.percentage === null ? "" : `${card.percentage.toFixed(2)}%`}</td>
+          </tr>
+          <tr className="rc-foot">
+            <td className="rc-course">{h.place_label}</td>
+            <td className="rc-v">{card.position ?? ""}</td>
+            <td className="rc-v">{card.class_size}</td>
+          </tr>
+          <tr className="rc-sign"><td className="rc-course">{h.parent_sign}</td><td colSpan={2} /></tr>
+          <tr className="rc-sign"><td className="rc-course">{h.teacher_sign}</td><td colSpan={2} /></tr>
+          <tr className="rc-sign">
+            <td className="rc-course">{h.done_at}</td>
+            <td colSpan={2}>{h.date_label} {dmy(h.date)}</td>
+          </tr>
         </tbody>
       </table>
+    </article>
+  );
+}
+
+const TERM_HEAD = ["1er", "2ème", "3ème"];
+const DECISIONS = [
+  ["promu", "L'ELEVE EST PROMU"],
+  ["redoublement", "L'ELEVE EST ADMIS AU REDOUBLEMENT"],
+  ["renvoye", "L'ELEVE EST RENVOYE"],
+] as const;
+
+function NurseryCard({ card }: { card: CardData }) {
+  const h = card.header;
+  const areas = h.areas ?? [];
+  const terms = card.nursery?.terms ?? [];
+  const rows = areas.flatMap((area) => [
+    { kind: "area" as const, key: area.code, title: area.title },
+    ...area.subjects.map((s) => ({ kind: "subject" as const, key: s.code, code: s.code, name: s.name })),
+  ]);
+  const rating = (sequence: number, code: string) =>
+    terms.find((t) => t.sequence === sequence)?.ratings?.[code] ?? null;
+
+  return (
+    <article className="report-card nursery-card">
+      <header className="nu-head">
+        <div>
+          <div>REPUBLIQUE DU RWANDA</div>
+          <div>MINISTERE DE L'EDUCATION</div>
+          <div>VILLE DE KIGALI</div>
+          <div>DISTRICT DE NYARUGENGE</div>
+          <div>SECTEUR DE NYAMIRAMBO</div>
+          <div>JERICHO SCHOOL</div>
+          <div>TEL: {h.phone}</div>
+          <div>Email: {h.email}</div>
+        </div>
+        <div className="nu-id">
+          <div>ANNEE SCOLAIRE: {h.academic_year}</div>
+          <div className="nu-banner">{h.title}</div>
+          <div className="nu-line"><span>NOM:</span><b>{card.student.name}</b></div>
+          <div className="nu-line"><span>CLASSE:</span><b>{h.class.label}</b></div>
+        </div>
+      </header>
+
+      <table className="nu-table">
+        <thead>
+          <tr>
+            <th>COURS</th>
+            <th>1<sup>er</sup> Trimestre</th>
+            <th>2<sup>ème</sup> Trimestre</th>
+            <th>3<sup>ème</sup> Trimestre</th>
+            <th>OBSERVATION</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, index) => (
+            <tr key={row.key} className={row.kind === "area" ? "nu-area" : undefined}>
+              {row.kind === "area" ? (
+                <td colSpan={4}>{row.title}</td>
+              ) : (
+                <>
+                  <td className="nu-course">{row.name}</td>
+                  {[1, 2, 3].map((sequence) => {
+                    const mark = rating(sequence, row.code);
+                    return <td key={sequence} className={mark ? RATING_CLASS[mark] : undefined} />;
+                  })}
+                </>
+              )}
+              {index === 0 && (
+                <td className="nu-obs" rowSpan={rows.length}>
+                  {TERM_HEAD.map((label, i) => (
+                    <div key={label} className="nu-obs-block">
+                      <div>{label === "1er" ? <>1<sup>er</sup> Trimestre</> : <>{i + 1}<sup>ème</sup> Trimestre</>}</div>
+                      <div className="nu-obs-text">{terms.find((t) => t.sequence === i + 1)?.observation}</div>
+                    </div>
+                  ))}
+                </td>
+              )}
+            </tr>
+          ))}
+          <tr className="nu-key">
+            <td>EXPLICATION</td>
+            <td className="nu-excellent">EXCELLENT</td>
+            <td className="nu-tres">TRES BON</td>
+            <td className="nu-bon">BON</td>
+            <td className="nu-assez">ASSEZ BON</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <footer className="nu-foot">
+        <div>
+          <div className="nu-delib">DELIBERATION:</div>
+          {DECISIONS.map(([value, label]) => (
+            <div key={value} className={card.nursery?.decision === value ? "nu-chosen" : undefined}>{label}</div>
+          ))}
+        </div>
+        <div className="nu-signs">
+          <div>SIGNATURE DU TITULAIRE</div>
+          <div>SIGNATURE DES PARENTS</div>
+          <div>DATE: {dmy(h.date)}</div>
+        </div>
+      </footer>
     </article>
   );
 }

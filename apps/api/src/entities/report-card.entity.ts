@@ -2,8 +2,8 @@ import { Column, Entity, Index, JoinColumn, ManyToOne, PrimaryGeneratedColumn } 
 import { numericTransformer } from './numeric.transformer';
 import { Student } from './student.entity';
 
-export type ReportKind = 'mid_term' | 'end_of_term' | 'end_of_year';
-export const REPORT_KINDS: ReportKind[] = ['mid_term', 'end_of_term', 'end_of_year'];
+export type ReportKind = 'mid_term' | 'end_of_term' | 'end_of_year' | 'nursery';
+export const REPORT_KINDS: ReportKind[] = ['mid_term', 'end_of_term', 'end_of_year', 'nursery'];
 
 // A generated bulletin, frozen at the moment the dean generated it so a
 // printed report can always be reproduced even after marks are corrected.

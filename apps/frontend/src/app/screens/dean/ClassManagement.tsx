@@ -493,7 +493,7 @@ export function ClassManagement() {
                     </label>
                   </p>
                   <p className="text-xs mt-1" style={{ color: 'var(--mid-gray)' }}>
-                    .xls or .xlsx. After you confirm, this page shows exactly who was added and who was left out.
+                    .xls or .xlsx. The file becomes this class. Pupils who are not on it are taken off the list.
                   </p>
                   {importing && <Loader2 className="mx-auto mt-3 animate-spin" size={18} style={{ color: 'var(--navy-blue)' }} />}
                 </div>
@@ -970,25 +970,22 @@ export function ClassManagement() {
       <Dialog open={!!importPreview} onOpenChange={(open) => { if (!open) { setImportPreview(null); setImportFile(null); } }}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>Compare class list</DialogTitle>
+            <DialogTitle>Replace this class list</DialogTitle>
             <DialogDescription>
               {importPreview?.message}
               {importPreview?.headers?.length ? ` Columns: ${importPreview.headers.length}.` : ''}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3 text-sm" style={{ color: 'var(--dark-gray)' }}>
-            <p><strong>{importPreview?.new_count ?? 0}</strong> new student{importPreview?.new_count === 1 ? '' : 's'} will be added.</p>
-            <p><strong>{importPreview?.already_in_class ?? 0}</strong> already in this class — left unchanged.</p>
-            {(importPreview?.already_elsewhere ?? 0) > 0 && (
-              <p><strong>{importPreview.already_elsewhere}</strong> already enrolled in another class — not added.</p>
-            )}
-            {!!importPreview?.new_students?.length && (
+            <p><strong>{importPreview?.on_file ?? 0}</strong> on the file will be this class.</p>
+            <p><strong>{importPreview?.removed_count ?? 0}</strong> currently here are not on the file and will be taken off.</p>
+            {!!importPreview?.removed?.length && (
               <div className="max-h-48 overflow-auto rounded border p-2" style={{ borderColor: 'var(--border)' }}>
-                {importPreview.new_students.slice(0, 30).map((student: { name: string }) => (
-                  <p key={student.name}>{student.name}</p>
+                {importPreview.removed.slice(0, 30).map((name: string) => (
+                  <p key={name}>{name}</p>
                 ))}
-                {importPreview.new_students.length > 30 && (
-                  <p style={{ color: 'var(--mid-gray)' }}>and {importPreview.new_students.length - 30} more</p>
+                {importPreview.removed.length > 30 && (
+                  <p style={{ color: 'var(--mid-gray)' }}>and {importPreview.removed.length - 30} more</p>
                 )}
               </div>
             )}
@@ -997,7 +994,7 @@ export function ClassManagement() {
             <Button variant="ghost" onClick={() => { setImportPreview(null); setImportFile(null); }} disabled={importing}>Cancel</Button>
             <Button onClick={confirmImport} disabled={importing} style={{ backgroundColor: 'var(--maroon)', color: '#fff' }}>
               {importing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Import students
+              Replace class list
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1009,7 +1006,7 @@ export function ClassManagement() {
             <DialogTitle>{importOutcome?.failed ? 'Import failed' : 'Import finished'}</DialogTitle>
             <DialogDescription>
               {importOutcome?.failed
-                ? 'Nothing was added.'
+                ? 'The class list was not changed.'
                 : `${pLevel?.name ?? ''}${selectedClass?.name ?? ''} class list`}
             </DialogDescription>
           </DialogHeader>
@@ -1017,31 +1014,17 @@ export function ClassManagement() {
             <p className="font-medium">{importOutcome?.message}</p>
             {!importOutcome?.failed && (
               <>
-                <p><strong>{importOutcome?.new_count ?? 0}</strong> new student{(importOutcome?.new_count ?? 0) === 1 ? '' : 's'} added.</p>
-                <p><strong>{importOutcome?.already_in_class ?? 0}</strong> already in this class, left unchanged.</p>
-                <p><strong>{importOutcome?.already_elsewhere ?? 0}</strong> already in another class, not added.</p>
-                {!!importOutcome?.new_students?.length && (
+                <p><strong>{importOutcome?.on_file ?? 0}</strong> on the file.</p>
+                <p><strong>{importOutcome?.removed_count ?? 0}</strong> taken off because they are not on this list.</p>
+                {!!importOutcome?.removed?.length && (
                   <div>
-                    <p className="font-medium mb-1">Added</p>
+                    <p className="font-medium mb-1">Taken off</p>
                     <div className="max-h-36 overflow-auto rounded border p-2" style={{ borderColor: 'var(--border)' }}>
-                      {importOutcome.new_students.slice(0, 30).map((student: { name: string }) => (
-                        <p key={student.name}>{student.name}</p>
-                      ))}
-                      {importOutcome.new_students.length > 30 && (
-                        <p style={{ color: 'var(--mid-gray)' }}>and {importOutcome.new_students.length - 30} more</p>
-                      )}
-                    </div>
-                  </div>
-                )}
-                {!!importOutcome?.elsewhere?.length && (
-                  <div>
-                    <p className="font-medium mb-1">Not added — already in another class</p>
-                    <div className="max-h-36 overflow-auto rounded border p-2" style={{ borderColor: 'var(--border)' }}>
-                      {importOutcome.elsewhere.slice(0, 30).map((name: string) => (
+                      {importOutcome.removed.slice(0, 30).map((name: string) => (
                         <p key={name}>{name}</p>
                       ))}
-                      {importOutcome.elsewhere.length > 30 && (
-                        <p style={{ color: 'var(--mid-gray)' }}>and {importOutcome.elsewhere.length - 30} more</p>
+                      {importOutcome.removed.length > 30 && (
+                        <p style={{ color: 'var(--mid-gray)' }}>and {importOutcome.removed.length - 30} more</p>
                       )}
                     </div>
                   </div>

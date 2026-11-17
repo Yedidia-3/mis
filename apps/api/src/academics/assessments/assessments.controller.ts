@@ -13,14 +13,18 @@ import {
   CreateCatalogueEntryDto, UpdateCatalogueEntryDto, AssignPLevelDto, CloseTermDto,
   TermsOverviewQueryDto,
 } from './dto/config.dto';
-import { CreateAssessmentDto, SaveScoresDto, UpdateAssessmentDto } from './dto/assessment.dto';
+import { CreateAssessmentDto, SaveRecordingDto, SaveScoresDto, UpdateAssessmentDto } from './dto/assessment.dto';
+import { RecordingService } from '../records/recording.service';
 
 // Literal segments are declared before ':id' so that /assessments/terms is not
 // captured as an assessment whose id is "terms".
 @Controller('api/v1/academics/assessments')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class AssessmentsController {
-  constructor(private assessmentsService: AssessmentsService) {}
+  constructor(
+    private assessmentsService: AssessmentsService,
+    private recording: RecordingService,
+  ) {}
 
   // ─── Course catalogue ─────────────────────────────────────────────────────────
 
@@ -157,6 +161,26 @@ export class AssessmentsController {
   @Roles('teacher')
   recordingOptions(@CurrentUser() user: User) {
     return this.assessmentsService.getRecordingOptions(user);
+  }
+
+  @Get('recording-sheet')
+  @Roles('teacher', 'dean', 'principal', 'super_admin')
+  recordingSheet(
+    @CurrentUser() user: User,
+    @Query('class_id') classId?: string,
+    @Query('term_id') termId?: string,
+  ) {
+    return this.recording.sheet(
+      user,
+      classId ? +classId : undefined,
+      termId ? +termId : undefined,
+    );
+  }
+
+  @Put('recording-sheet')
+  @Roles('teacher', 'dean', 'principal', 'super_admin')
+  saveRecording(@Body() dto: SaveRecordingDto, @CurrentUser() user: User) {
+    return this.recording.save(user, dto);
   }
 
   // ─── Supervisors' oversight list ─────────────────────────────────────────────

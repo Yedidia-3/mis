@@ -1,5 +1,8 @@
 import { BadRequestException } from '@nestjs/common';
 import type * as XLSXType from 'xlsx';
+import { normalizeName } from './class-list-roster';
+
+export { normalizeName } from './class-list-roster';
 
 function loadXlsx(): typeof XLSXType {
   try {
@@ -162,10 +165,6 @@ function parseGrid(grid: unknown[][]): ParsedClassSheet | null {
   }
 
   return { headers, rows, classLabel };
-}
-
-export function normalizeName(name: string): string {
-  return name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
 }
 
 export function sheetCell(student: { name: string; former_class?: string | null; rank?: number | null; marks_percentage?: number | string | null; sheet?: Record<string, string> | null }, header: string): string {

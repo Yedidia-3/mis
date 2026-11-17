@@ -11,7 +11,8 @@ import { PLevel } from '../entities/p-level.entity';
 import { Student } from '../entities/student.entity';
 import { User } from '../entities/user.entity';
 import { NotificationsService } from '../notifications/notifications.service';
-import { classCodeFromLabel, normalizeName, parseClassListSheet } from './class-list-sheet';
+import { assignClassList } from './class-list-roster';
+import { classCodeFromLabel, parseClassListSheet } from './class-list-sheet';
 import { TeachingService } from './teaching/teaching.service';
 import { defaultTeachingModel, TeachingModel } from './teaching-model';
 
@@ -1054,10 +1055,8 @@ export class AcademicsService {
   }
 
   /**
-   * Compare a class workbook with the students already on this class.
-   * Names already in this class stay, and their row is filled from the file.
-   * Only names that are not already in the academic year are inserted.
-   * The class grid then uses this file's headers.
+   * The workbook replaces this class. Pupils on the file stay, or move here
+   * from another class. Pupils on this class who are not on the file leave it.
    */
   async importClassList(classId: number, fileBuffer: Buffer, dryRun: boolean, user?: User) {
     const cls = await this.classRepo.findOne({ where: { id: classId, status: 'active' } });
@@ -1067,36 +1066,39 @@ export class AcademicsService {
 
     const parsed = parseClassListSheet(fileBuffer);
     const existing = await this.studentRepo.find({ where: { academic_year_id: pLevel.academic_year_id } });
-    const inClass = new Map<string, Student>();
-    const elsewhere = new Map<string, Student>();
-    for (const student of existing) {
-      const key = normalizeName(student.name);
-      if (!key) continue;
-      if (student.current_class_id === classId) inClass.set(key, student);
-      else if (!elsewhere.has(key)) elsewhere.set(key, student);
-    }
+    const byId = new Map(existing.map((student) => [student.id, student]));
+    const plan = assignClassList(
+      classId,
+      parsed.rows,
+      existing.map((student) => ({
+        id: student.id,
+        name: student.name,
+        studentIdNumber: student.student_id_number,
+        classId: student.current_class_id ?? null,
+      })),
+    );
 
-    const toAdd: typeof parsed.rows = [];
-    const already: { student: Student; row: (typeof parsed.rows)[number] }[] = [];
-    const other: { name: string }[] = [];
-    for (const row of parsed.rows) {
-      const key = normalizeName(row.name);
-      const current = inClass.get(key);
-      if (current) already.push({ student: current, row });
-      else if (elsewhere.has(key)) other.push({ name: row.name });
-      else toAdd.push(row);
-    }
+    const applyRow = (student: Student, row: (typeof parsed.rows)[number]) => {
+      student.name = row.name;
+      student.current_class_id = classId;
+      student.sheet = row.cells;
+      if (row.studentIdNumber) student.student_id_number = row.studentIdNumber;
+      if (row.formerClass) student.former_class = row.formerClass;
+      if (row.rank != null) student.rank = row.rank;
+      if (row.marks != null) student.marks_percentage = row.marks;
+      if (student.status === 'transferred') student.status = 'active';
+      student.approval_status = 'approved';
+    };
 
     if (!dryRun) {
-      if (already.length) {
-        for (const item of already) {
-          item.student.sheet = { ...(item.student.sheet ?? {}), ...item.row.cells };
-          if (item.row.studentIdNumber) item.student.student_id_number = item.row.studentIdNumber;
-        }
-        await this.studentRepo.save(already.map((item) => item.student), { chunk: 100 });
-      }
-      if (toAdd.length) {
-        const created = toAdd.map((row) => this.studentRepo.create({
+      const staying = [...plan.kept, ...plan.moved].map((item) => {
+        const student = byId.get(item.id)!;
+        applyRow(student, item.row);
+        return student;
+      });
+      if (staying.length) await this.studentRepo.save(staying, { chunk: 100 });
+      if (plan.added.length) {
+        const created = plan.added.map((row) => this.studentRepo.create({
           name: row.name,
           student_id_number: row.studentIdNumber ?? null,
           academic_year_id: pLevel.academic_year_id,
@@ -1115,33 +1117,34 @@ export class AcademicsService {
         }));
         await this.studentRepo.save(created, { chunk: 100 });
       }
+      if (plan.removedIds.length) {
+        const leaving = plan.removedIds.map((id) => byId.get(id)!);
+        for (const student of leaving) {
+          student.current_class_id = null;
+          student.status = 'transferred';
+        }
+        await this.studentRepo.save(leaving, { chunk: 100 });
+      }
       cls.list_headers = parsed.headers;
       await this.classRepo.save(cls);
     }
 
+    const onFile = parsed.rows.length;
+    const verb = dryRun ? 'will have' : 'now has';
     return {
       headers: parsed.headers,
       class_label: parsed.classLabel,
-      new_count: toAdd.length,
-      already_in_class: already.length,
-      already_elsewhere: other.length,
-      new_students: toAdd.map((row) => ({ name: row.name })),
-      skipped: already.map((item) => item.row.name),
-      elsewhere: other.map((row) => row.name),
-      message: dryRun
-        ? `${toAdd.length} new, ${already.length} already in this class, ${other.length} already in another class.`
-        : [
-            toAdd.length
-              ? `Added ${toAdd.length} new student${toAdd.length === 1 ? '' : 's'} to this class.`
-              : 'No new students were added.',
-            already.length
-              ? `Filled in the file columns for ${already.length} student${already.length === 1 ? '' : 's'} already in this class.`
-              : 'Nobody already in this class needed a column update.',
-            other.length
-              ? `${other.length} already in another class ${other.length === 1 ? 'was' : 'were'} not added.`
-              : 'Nobody was skipped for being in another class.',
-            'The class list columns now match the file.',
-          ].join(' '),
+      on_file: onFile,
+      new_count: plan.added.length,
+      kept_count: plan.kept.length,
+      moved_count: plan.moved.length,
+      removed_count: plan.removedIds.length,
+      already_in_class: plan.kept.length,
+      already_elsewhere: 0,
+      new_students: plan.added.map((row) => ({ name: row.name })),
+      moved: plan.moved.map((item) => item.row.name),
+      removed: plan.removedIds.map((id) => byId.get(id)!.name),
+      message: `This class ${verb} ${onFile} student${onFile === 1 ? '' : 's'} from the file. ${plan.kept.length} already here, ${plan.moved.length} moved from another class, ${plan.added.length} new, ${plan.removedIds.length} taken off because they are not on this list.`,
     };
   }
 
@@ -1187,10 +1190,14 @@ export class AcademicsService {
             class_label: `${code.level}${code.letter}`,
             class_created: true,
             headers: parsed.headers,
+            on_file: parsed.rows.length,
             new_count: parsed.rows.length,
+            kept_count: 0,
+            moved_count: 0,
+            removed_count: 0,
             already_in_class: 0,
             already_elsewhere: 0,
-            message: `${code.level}${code.letter} will be created with ${parsed.rows.length} student${parsed.rows.length === 1 ? '' : 's'}.`,
+            message: `${code.level}${code.letter} will be created with ${parsed.rows.length} student${parsed.rows.length === 1 ? '' : 's'} from the file.`,
           });
           continue;
         }
@@ -1215,8 +1222,8 @@ export class AcademicsService {
     return {
       results,
       message: dryRun
-        ? `${ready} class list${ready === 1 ? '' : 's'} ready. ${failed} file${failed === 1 ? '' : 's'} could not be matched.`
-        : `${ready} class list${ready === 1 ? '' : 's'} updated. ${failed} file${failed === 1 ? '' : 's'} could not be matched.`,
+        ? `${ready} class list${ready === 1 ? '' : 's'} will be replaced by ${ready === 1 ? 'this file' : 'these files'}. ${failed} file${failed === 1 ? '' : 's'} could not be matched.`
+        : `${ready} class list${ready === 1 ? '' : 's'} now match${ready === 1 ? 'es' : ''} ${ready === 1 ? 'the file' : 'the files'}. ${failed} file${failed === 1 ? '' : 's'} could not be matched.`,
     };
   }
 

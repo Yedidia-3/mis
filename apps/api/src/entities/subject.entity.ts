@@ -52,8 +52,8 @@ export class Subject {
   @Column({ nullable: true })
   catalogue_id: number | null;
 
-  // Report maximum for each half of the bulletin: TJ is out of this, EXAM is
-  // out of this, and the subject total is out of twice this.
+  // Mid-term points are out of this number. It comes from the school's
+  // mid-term workbooks and is filled in automatically.
   @Column({ type: 'numeric', precision: 6, scale: 2, nullable: true, transformer: numericTransformer })
   report_max: number | null;
 
