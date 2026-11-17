@@ -55,6 +55,22 @@ async function uploadTree(sftp, localDir, remoteDir) {
   }
 }
 
+// Old hashed bundles stay on the server forever unless removed. A browser that
+// still has the previous index.html keeps showing End of term and End of year.
+async function replaceTree(sftp, localDir, remoteDir) {
+  await sftp.mkdir(remoteDir, true);
+  const keep = new Set(walk(localDir).map((file) => relative(localDir, file).split('\\').join('/')));
+  const existing = await sftp.list(remoteDir);
+  for (const entry of existing) {
+    if (entry.type === 'd') continue;
+    if (!keep.has(entry.name)) {
+      await sftp.delete(`${remoteDir}/${entry.name}`);
+      console.log(`Removed old file ${entry.name}`);
+    }
+  }
+  await uploadTree(sftp, localDir, remoteDir);
+}
+
 const sftp = new SftpClient();
 await sftp.connect({
   host: process.env.CPANEL_HOST || '198.38.92.236',
@@ -70,7 +86,9 @@ try {
     await uploadTree(sftp, join(apiModules, name), `${modulesRemote}/${name}`);
   }
   await sftp.fastPut(join(webDist, 'index.html'), `${webRemote}/index.html`);
-  await uploadTree(sftp, join(webDist, 'assets'), `${webRemote}/assets`);
+  const htaccess = join(webDist, '.htaccess');
+  try { await sftp.fastPut(htaccess, `${webRemote}/.htaccess`); } catch { /* no htaccess in this build */ }
+  await replaceTree(sftp, join(webDist, 'assets'), `${webRemote}/assets`);
   const roster = (process.env.STAFF_ROSTER ?? '').trim();
   if (roster.startsWith('[')) {
     await sftp.put(Buffer.from(roster), `${home}/api.jerichoschool.ac.rw/staff-roster.json`);
