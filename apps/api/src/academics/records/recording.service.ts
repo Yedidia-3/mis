@@ -11,10 +11,10 @@ import { bandOf } from './school-band';
 
 const SUPERVISORS = ['dean', 'principal', 'super_admin'];
 
-export interface RecordingScoreInput { student_id: number; subject_id: number; score: number | null }
-export interface RecordingRatingInput { student_id: number; subject_code: string; rating: NurseryRating | null }
-export interface RecordingTextInput { student_id: number; observation: string | null }
-export interface RecordingDecisionInput { student_id: number; decision: NurseryDecision | null }
+export interface RecordingScoreInput { student_id: number; subject_id: number; score?: number | null }
+export interface RecordingRatingInput { student_id: number; subject_code: string; rating?: NurseryRating | null }
+export interface RecordingTextInput { student_id: number; observation?: string | null }
+export interface RecordingDecisionInput { student_id: number; decision?: NurseryDecision | null }
 
 export interface SaveRecordingInput {
   class_id: number;
@@ -86,7 +86,9 @@ export class RecordingService {
 
     await this.db.transaction(async (manager) => {
       if (sheet.mode === 'midterm') {
-        const allowed = new Map(sheet.subjects.map((s: any) => [s.id, s.max]));
+        const allowed = new Map<number, number>(
+          sheet.subjects.map((s: { id: number; max: number }) => [s.id, Number(s.max)]),
+        );
         for (const entry of dto.scores ?? []) {
           onRoster(entry.student_id);
           const max = allowed.get(entry.subject_id);

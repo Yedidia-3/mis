@@ -14,10 +14,10 @@ export interface RosterPerson {
   classId: number | null;
 }
 
-export interface RosterPlan {
-  kept: { id: number; row: RosterRow }[];
-  moved: { id: number; row: RosterRow }[];
-  added: RosterRow[];
+export interface RosterPlan<T extends RosterRow = RosterRow> {
+  kept: { id: number; row: T }[];
+  moved: { id: number; row: T }[];
+  added: T[];
   removedIds: number[];
 }
 
@@ -30,7 +30,11 @@ function codeKey(value: string | null | undefined): string {
  * name, stays and is moved onto this class when they sat somewhere else.
  * Anyone still on this class who is not on the file is taken off.
  */
-export function assignClassList(classId: number, rows: RosterRow[], people: RosterPerson[]): RosterPlan {
+export function assignClassList<T extends RosterRow>(
+  classId: number,
+  rows: T[],
+  people: RosterPerson[],
+): RosterPlan<T> {
   const used = new Set<number>();
   const byCode = new Map<string, RosterPerson[]>();
   const byName = new Map<string, RosterPerson[]>();
@@ -58,9 +62,9 @@ export function assignClassList(classId: number, rows: RosterRow[], people: Rost
       ?? free[0];
   };
 
-  const kept: RosterPlan['kept'] = [];
-  const moved: RosterPlan['moved'] = [];
-  const added: RosterRow[] = [];
+  const kept: RosterPlan<T>['kept'] = [];
+  const moved: RosterPlan<T>['moved'] = [];
+  const added: T[] = [];
 
   for (const row of rows) {
     const match = pick(row.studentIdNumber ? byCode.get(codeKey(row.studentIdNumber)) : undefined)
