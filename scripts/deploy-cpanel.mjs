@@ -81,6 +81,20 @@ try {
     `${home}/api.jerichoschool.ac.rw/tmp/restart.txt`,
   );
   console.log('Uploaded API dist, frontend, and restart.txt');
+  await new Promise((resolve) => setTimeout(resolve, 20000));
+  for (const logPath of [
+    `${home}/api.jerichoschool.ac.rw/stderr.log`,
+    `${home}/logs/api.jerichoschool.ac.rw.error.log`,
+    `${home}/api.jerichoschool.ac.rw/nodejs.log`,
+  ]) {
+    try {
+      const buf = await sftp.get(logPath);
+      const lines = buf.toString().trim().split('\n').slice(-30);
+      console.log(`--- ${logPath} ---\n${lines.join('\n')}`);
+    } catch {
+      console.log(`no log at ${logPath}`);
+    }
+  }
   const statusRemote = `${home}/api.jerichoschool.ac.rw/staff-roster-status.txt`;
   if (roster.startsWith('[')) {
     try { await sftp.delete(statusRemote); } catch { /* no previous status */ }

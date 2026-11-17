@@ -29,6 +29,10 @@ import { AuditInterceptor } from './audit/audit.interceptor';
         ...buildDbConnection(),
         entities,
         migrations: [join(__dirname, 'migrations', '*.{ts,js}')],
+        // Each migration in its own transaction. One shared transaction cannot
+        // add a Postgres enum value and then use it, and that failure stops
+        // the API from ever listening.
+        migrationsTransactionMode: 'each',
         // Apply pending migrations on boot. Handy on Railway/Render where there
         // is no shell step; leave unset to run them deliberately instead.
         migrationsRun: process.env.RUN_MIGRATIONS === 'true',

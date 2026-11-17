@@ -22,5 +22,6 @@ export const AppDataSource = new DataSource({
   ...buildDbConnection(),
   entities,
   migrations: [join(__dirname, 'migrations', '*.{ts,js}')],
+  migrationsTransactionMode: 'each',
   synchronize: false,
 });
