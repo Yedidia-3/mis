@@ -136,7 +136,7 @@ export function RecordMidterm({ classId, onClose }: { classId: string; onClose: 
   if (!sheet?.subjects?.length) {
     return (
       <EmptyState icon={<Save size={44} />} title="No lesson of yours on this mid-term">
-        You record only the lesson the dean assigned to you in this class.
+        The lessons here are the ones the dean assigned you in this class.
       </EmptyState>
     );
   }

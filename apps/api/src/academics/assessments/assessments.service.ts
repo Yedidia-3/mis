@@ -559,12 +559,12 @@ export class AssessmentsService {
 
     const classes: any[] = await this.classRepo.query(
       `SELECT DISTINCT c.id, c.name, c.teacher_id, pl.id AS p_level_id, pl.name AS p_level_name
-       FROM classes c
+       FROM teaching_assignments ta
+       JOIN classes c ON c.id = ta.class_id
        JOIN p_levels pl ON pl.id = c.p_level_id
-       LEFT JOIN teaching_assignments ta ON ta.class_id = c.id AND ta.teacher_id = $1
-       WHERE pl.academic_year_id = $2
+       WHERE ta.teacher_id = $1
+         AND pl.academic_year_id = $2
          AND c.status = 'active' AND c.distributed_at IS NOT NULL
-         AND (c.teacher_id = $1 OR ta.id IS NOT NULL)
        ORDER BY pl.name ASC, c.name ASC`,
       [user.id, year.id],
     );
@@ -572,20 +572,13 @@ export class AssessmentsService {
     const result = [];
     for (const c of classes) {
       const isClassTeacher = c.teacher_id === user.id;
-      const subjects = isClassTeacher
-        ? await this.classRepo.query(
-            `SELECT id, name, code FROM subjects
-             WHERE p_level_id = $1 AND status = 'active'
-             ORDER BY display_order ASC, name ASC`,
-            [c.p_level_id],
-          )
-        : await this.classRepo.query(
-            `SELECT s.id, s.name, s.code FROM teaching_assignments ta
-             JOIN subjects s ON s.id = ta.subject_id
-             WHERE ta.teacher_id = $1 AND ta.class_id = $2 AND s.status = 'active'
-             ORDER BY s.display_order ASC, s.name ASC`,
-            [user.id, c.id],
-          );
+      const subjects = await this.classRepo.query(
+        `SELECT s.id, s.name, s.code FROM teaching_assignments ta
+         JOIN subjects s ON s.id = ta.subject_id
+         WHERE ta.teacher_id = $1 AND ta.class_id = $2 AND s.status = 'active'
+         ORDER BY s.display_order ASC, s.name ASC`,
+        [user.id, c.id],
+      );
       const roster = await this.rosterFor(c.id);
       result.push({
         id: c.id,
@@ -907,8 +900,7 @@ export class AssessmentsService {
        JOIN subjects s  ON s.id = a.subject_id
        JOIN assessment_types ty ON ty.id = a.assessment_type_id
        JOIN terms t     ON t.id = a.term_id
-       WHERE c.teacher_id = $1
-          OR EXISTS (SELECT 1 FROM teaching_assignments ta
+       WHERE EXISTS (SELECT 1 FROM teaching_assignments ta
                      WHERE ta.teacher_id = $1 AND ta.class_id = a.class_id AND ta.subject_id = a.subject_id)
        ORDER BY a.date DESC, a.id DESC`,
       [user.id],

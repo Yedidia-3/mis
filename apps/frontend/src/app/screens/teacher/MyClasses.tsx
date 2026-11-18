@@ -59,7 +59,7 @@ export function MyClasses() {
           <BookOpen size={48} className="mx-auto mb-3" style={{ color: "var(--mid-gray)" }} />
           <p className="text-lg font-semibold" style={{ color: "var(--dark-gray)" }}>No classes assigned yet</p>
           <p className="text-sm mt-2" style={{ color: "var(--mid-gray)" }}>
-            The dean assigns you to a class, and to the lesson you teach, before you can record.
+            Your classes and lessons come from the assignments the dean saved.
           </p>
         </div>
       ) : (

@@ -1356,68 +1356,59 @@ export class AcademicsService {
   // ─── Teacher portal ───────────────────────────────────────────────────────────
 
   async getTeacherClasses(teacherId: number) {
-    // Distributed classes in the active year where they are class teacher or
-    // hold at least one subject — specialists see only those classes.
-    const classes = await this.classRepo.query(
+    // The dean's Teacher Assignments are the list. A class teacher does not
+    // pick up every subject on the level unless those rows were assigned.
+    const rows = await this.classRepo.query(
       `SELECT c.id, c.name, c.p_level_id, pl.name AS p_level_name,
               (c.teacher_id = $1) AS is_class_teacher,
-              (SELECT COUNT(*) FROM students s WHERE s.current_class_id = c.id) AS student_count
-       FROM classes c
+              (SELECT COUNT(*) FROM students s WHERE s.current_class_id = c.id) AS student_count,
+              s.code AS subject_code, s.name AS subject_name
+       FROM teaching_assignments ta
+       JOIN classes c ON c.id = ta.class_id
        JOIN p_levels pl ON pl.id = c.p_level_id
-       LEFT JOIN teaching_assignments ta ON ta.class_id = c.id AND ta.teacher_id = $1
-       WHERE c.status = 'active'
+       JOIN subjects s ON s.id = ta.subject_id
+       WHERE ta.teacher_id = $1
+         AND c.status = 'active'
          AND c.distributed_at IS NOT NULL
+         AND s.status = 'active'
          AND pl.academic_year_id = (SELECT id FROM academic_years WHERE status = 'active' ORDER BY created_at DESC LIMIT 1)
-         AND (c.teacher_id = $1 OR ta.id IS NOT NULL)
-       GROUP BY c.id, c.name, c.p_level_id, pl.name, c.teacher_id
-       ORDER BY pl.name ASC, c.name ASC`,
+       ORDER BY pl.name ASC, c.name ASC, s.display_order ASC, s.name ASC`,
       [teacherId],
     );
-    const classIds = classes.map((c: any) => c.id);
-    const assigned: { class_id: number; code: string; name: string }[] = classIds.length
-      ? await this.classRepo.query(
-          `SELECT ta.class_id, s.code, s.name
-           FROM teaching_assignments ta
-           JOIN subjects s ON s.id = ta.subject_id
-           WHERE ta.teacher_id = $1 AND ta.class_id = ANY($2::int[])`,
-          [teacherId, classIds],
-        )
-      : [];
-    const assignedByClass = new Map<number, { code: string; name: string }[]>();
-    for (const row of assigned) {
-      const list = assignedByClass.get(row.class_id) ?? [];
-      list.push(row);
-      assignedByClass.set(row.class_id, list);
+    const byClass = new Map<number, any>();
+    for (const row of rows) {
+      let group = byClass.get(row.id);
+      if (!group) {
+        group = { ...row, subjects: [] as { code: string; name: string }[] };
+        byClass.set(row.id, group);
+      }
+      group.subjects.push({ code: row.subject_code, name: row.subject_name });
     }
 
-    return classes.map((c: any) => {
+    return [...byClass.values()].map((c) => {
       const levelName = c.p_level_name as string;
       const nursery = bandOf(levelName) === 'nursery';
       const year = primaryYear(levelName);
-      const classTeacher = !!c.is_class_teacher;
-      let lessons: { code: string; name: string; max: number }[] = [];
+      const lessons: { code: string; name: string; max: number }[] = [];
       if (!nursery && year) {
         const copy = midtermCopy(year);
         const allowed = new Map(copy.subjects.map((subject) => [subject.code, subject]));
         const codes = new Set<BulletinCode>();
-        if (classTeacher) {
-          for (const code of BULLETIN_ORDER) codes.add(code);
-        } else {
-          for (const subject of assignedByClass.get(c.id) ?? []) {
-            const code = canonicalSubject(subject.code, subject.name);
-            if (code && allowed.has(code)) codes.add(code);
-          }
+        for (const subject of c.subjects) {
+          const code = canonicalSubject(subject.code, subject.name);
+          if (code && allowed.has(code)) codes.add(code);
         }
-        lessons = BULLETIN_ORDER.filter((code) => codes.has(code)).map((code) => {
+        for (const code of BULLETIN_ORDER) {
+          if (!codes.has(code)) continue;
           const subject = allowed.get(code)!;
-          return { code: subject.code, name: subject.name, max: subject.max };
-        });
+          lessons.push({ code: subject.code, name: subject.name, max: subject.max });
+        }
       }
       return {
         id: c.id,
         name: c.name,
         p_level: { id: c.p_level_id, name: levelName },
-        is_class_teacher: classTeacher,
+        is_class_teacher: !!c.is_class_teacher,
         student_count: Number(c.student_count ?? 0),
         mode: nursery ? 'nursery' as const : 'midterm' as const,
         lessons,
@@ -1625,20 +1616,17 @@ export class AcademicsService {
   }
 
   /**
-   * Teachers reach a class only as its class teacher or via a teaching
-   * assignment. A P4 teacher therefore cannot open a P6 class list.
+   * Teachers reach a class only through a row the dean saved on Teacher
+   * Assignments. Being the class teacher does not open a class on its own.
    */
   private async assertTeacherOwnsClass(classId: number, user: User) {
     if (user.role !== 'teacher') return;
     const allowed = await this.classRepo.query(
       `SELECT 1 FROM classes c
        WHERE c.id = $1 AND c.status = 'active'
-         AND (
-           c.teacher_id = $2
-           OR EXISTS (
-             SELECT 1 FROM teaching_assignments ta
-             WHERE ta.class_id = c.id AND ta.teacher_id = $2
-           )
+         AND EXISTS (
+           SELECT 1 FROM teaching_assignments ta
+           WHERE ta.class_id = c.id AND ta.teacher_id = $2
          )
        LIMIT 1`,
       [classId, user.id],
@@ -1648,19 +1636,19 @@ export class AcademicsService {
     }
   }
 
-  /** Class ids this teacher may see: class teacher or subject assignment. */
+  /** Class ids from the dean's Teacher Assignments for this teacher. */
   async teacherVisibleClassIds(teacherId: number): Promise<number[]> {
     const rows = await this.classRepo.query(
       `SELECT DISTINCT c.id
-       FROM classes c
+       FROM teaching_assignments ta
+       JOIN classes c ON c.id = ta.class_id
        JOIN p_levels pl ON pl.id = c.p_level_id
-       LEFT JOIN teaching_assignments ta ON ta.class_id = c.id AND ta.teacher_id = $1
-       WHERE c.status = 'active'
+       WHERE ta.teacher_id = $1
+         AND c.status = 'active'
          AND c.distributed_at IS NOT NULL
          AND pl.academic_year_id = (
            SELECT id FROM academic_years WHERE status = 'active' ORDER BY created_at DESC LIMIT 1
-         )
-         AND (c.teacher_id = $1 OR ta.id IS NOT NULL)`,
+         )`,
       [teacherId],
     );
     return rows.map((r: any) => Number(r.id));

@@ -194,7 +194,7 @@ export class RecordingService {
        LEFT JOIN teaching_assignments ta ON ta.class_id = c.id AND ta.teacher_id = $1
        WHERE pl.academic_year_id = $2
          AND c.status = 'active' AND c.distributed_at IS NOT NULL
-         AND ($3::boolean OR c.teacher_id = $1 OR ta.id IS NOT NULL)
+         AND ($3::boolean OR ta.id IS NOT NULL)
        ORDER BY pl.name ASC, c.name ASC`,
       [user.id, yearId, supervisor],
     );
@@ -225,7 +225,6 @@ export class RecordingService {
     if (!year) throw new BadRequestException('This class does not have a mid-term bulletin');
     const copy = midtermCopy(year);
     const supervisor = SUPERVISORS.includes(user.role);
-    const classTeacher = cls.teacher_id === user.id || supervisor;
 
     const subjects: any[] = await this.db.query(
       `SELECT id, name, code, report_max FROM subjects
@@ -240,7 +239,7 @@ export class RecordingService {
       })
       .filter(Boolean) as { id: number; canon: BulletinCode; max: number }[];
 
-    if (!classTeacher) {
+    if (!supervisor) {
       const assigned: { subject_id: number }[] = await this.db.query(
         `SELECT subject_id FROM teaching_assignments WHERE teacher_id = $1 AND class_id = $2`,
         [user.id, cls.id],
