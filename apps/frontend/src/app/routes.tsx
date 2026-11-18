@@ -48,7 +48,6 @@ import { ReportsHome } from "./screens/dean/reports/ReportsHome";
 import { TermControl } from "./screens/dean/terms/TermControl";
 import { TeacherAssignments } from "./screens/dean/teaching/TeacherAssignments";
 import { TeacherDetail } from "./screens/dean/teaching/TeacherDetail";
-import { MarksList } from "./screens/teacher/marks/MarksList";
 import { MarksSheet } from "./screens/teacher/marks/MarksSheet";
 
 // Accountant screens
@@ -224,7 +223,9 @@ export const router = createBrowserRouter([
       },
       {
         path: "teacher/marks",
-        Component: MarksList,
+        Component: function TeacherMarksHome() {
+          return <Navigate to="/teacher/my-classes" replace />;
+        },
       },
       {
         path: "teacher/marks/:id",

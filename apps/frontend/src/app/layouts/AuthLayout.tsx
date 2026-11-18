@@ -4,7 +4,6 @@ import {
     BookUser,
     CalendarRange,
     ClipboardCheck,
-    ClipboardPen,
     DollarSign,
     FileSpreadsheet,
     FileText,
@@ -73,7 +72,6 @@ const navItems = {
   teacher: [
     { icon: LayoutDashboard, label: "Dashboard",          path: "/teacher/dashboard" },
     { icon: BookOpen,        label: "My Classes",         path: "/teacher/my-classes" },
-    { icon: ClipboardPen,    label: "Marks",              path: "/teacher/marks" },
     { icon: Users,           label: "Students",           path: "/students" },
     { icon: ClipboardCheck,  label: "Attendance History", path: "/teacher/attendance-history" },
   ],

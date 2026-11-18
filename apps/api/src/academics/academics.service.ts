@@ -13,6 +13,8 @@ import { User } from '../entities/user.entity';
 import { NotificationsService } from '../notifications/notifications.service';
 import { assignClassList } from './class-list-roster';
 import { classCodeFromLabel, parseClassListSheet } from './class-list-sheet';
+import { BULLETIN_ORDER, BulletinCode, canonicalSubject, midtermCopy, primaryYear } from './records/bulletin';
+import { bandOf } from './records/school-band';
 import { TeachingService } from './teaching/teaching.service';
 import { defaultTeachingModel, TeachingModel } from './teaching-model';
 
@@ -1371,13 +1373,56 @@ export class AcademicsService {
        ORDER BY pl.name ASC, c.name ASC`,
       [teacherId],
     );
-    return classes.map((c: any) => ({
-      id: c.id,
-      name: c.name,
-      p_level: { id: c.p_level_id, name: c.p_level_name },
-      is_class_teacher: !!c.is_class_teacher,
-      student_count: Number(c.student_count ?? 0),
-    }));
+    const classIds = classes.map((c: any) => c.id);
+    const assigned: { class_id: number; code: string; name: string }[] = classIds.length
+      ? await this.classRepo.query(
+          `SELECT ta.class_id, s.code, s.name
+           FROM teaching_assignments ta
+           JOIN subjects s ON s.id = ta.subject_id
+           WHERE ta.teacher_id = $1 AND ta.class_id = ANY($2::int[])`,
+          [teacherId, classIds],
+        )
+      : [];
+    const assignedByClass = new Map<number, { code: string; name: string }[]>();
+    for (const row of assigned) {
+      const list = assignedByClass.get(row.class_id) ?? [];
+      list.push(row);
+      assignedByClass.set(row.class_id, list);
+    }
+
+    return classes.map((c: any) => {
+      const levelName = c.p_level_name as string;
+      const nursery = bandOf(levelName) === 'nursery';
+      const year = primaryYear(levelName);
+      const classTeacher = !!c.is_class_teacher;
+      let lessons: { code: string; name: string; max: number }[] = [];
+      if (!nursery && year) {
+        const copy = midtermCopy(year);
+        const allowed = new Map(copy.subjects.map((subject) => [subject.code, subject]));
+        const codes = new Set<BulletinCode>();
+        if (classTeacher) {
+          for (const code of BULLETIN_ORDER) codes.add(code);
+        } else {
+          for (const subject of assignedByClass.get(c.id) ?? []) {
+            const code = canonicalSubject(subject.code, subject.name);
+            if (code && allowed.has(code)) codes.add(code);
+          }
+        }
+        lessons = BULLETIN_ORDER.filter((code) => codes.has(code)).map((code) => {
+          const subject = allowed.get(code)!;
+          return { code: subject.code, name: subject.name, max: subject.max };
+        });
+      }
+      return {
+        id: c.id,
+        name: c.name,
+        p_level: { id: c.p_level_id, name: levelName },
+        is_class_teacher: classTeacher,
+        student_count: Number(c.student_count ?? 0),
+        mode: nursery ? 'nursery' as const : 'midterm' as const,
+        lessons,
+      };
+    });
   }
 
   async getClassStudents(classId: number) {
