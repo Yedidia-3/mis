@@ -242,6 +242,19 @@ export function RecordMidterm({ classId, onClose }: { classId: string; onClose: 
         </div>
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" onClick={onClose}>Back to class list</Button>
+        </div>
+      </div>
+
+      <div className="rounded-2xl border p-3 sm:p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3"
+        style={{ borderColor: "var(--border)", backgroundColor: "color-mix(in srgb, var(--maroon) 6%, white)" }}>
+        <div className="text-sm" style={{ color: "var(--dark-gray)" }}>
+          {submitted
+            ? `${subject?.name} is with the dean. Reopen only to correct a mark.`
+            : blankCount > 0
+              ? `Save as you go. ${blankCount} pupil${blankCount === 1 ? "" : "s"} still need a mark before Submit to dean.`
+              : `Every pupil has a mark for ${subject?.name}. Submit to dean when you are ready.`}
+        </div>
+        <div className="flex flex-wrap gap-2">
           {!submitted ? (
             <>
               <Button onClick={save} disabled={locked || saving || submitting || !!markError}
@@ -266,22 +279,12 @@ export function RecordMidterm({ classId, onClose }: { classId: string; onClose: 
         </div>
       </div>
 
-      {submitted && (
-        <p className="text-sm rounded-xl border p-3" style={{ borderColor: "var(--border)", color: "var(--dark-gray)" }}>
-          {subject?.name} was submitted to the dean. Reopen it only if a mark needs correcting.
-        </p>
-      )}
       {sheet.locked && !submitted && (
         <p className="text-sm rounded-xl border p-3" style={{ borderColor: "var(--border)", color: "var(--dark-gray)" }}>
           {sheet.term.name} is {sheet.term.status === "closed" ? "closed" : "not open"}, so these marks cannot be changed.
         </p>
       )}
       {markError && <p className="text-sm" style={{ color: "var(--danger-red)" }}>{markError}</p>}
-      {!submitted && blankCount > 0 && (
-        <p className="text-sm" style={{ color: "var(--mid-gray)" }}>
-          {blankCount} pupil{blankCount === 1 ? "" : "s"} still need a mark before you can submit.
-        </p>
-      )}
 
       <div className="flex flex-col sm:flex-row gap-2">
         <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search pupil" className="h-11" />
@@ -329,7 +332,7 @@ export function RecordMidterm({ classId, onClose }: { classId: string; onClose: 
         </table>
       </div>
       <p className="text-xs" style={{ color: "var(--mid-gray)" }}>
-        Save while you work. Submit to dean when every pupil has a mark for this lesson.
+        Use Save while you type. Use Submit to dean when the lesson sheet is complete.
       </p>
     </div>
   );
