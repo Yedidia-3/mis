@@ -10,8 +10,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { SECTION_FROM_PATH } from "./AcademicRecords";
 
 interface Submitted {
-  id: number; title: string; date: string; max_score: number; submitted_at: string; class_label: string;
+  id: number; title: string; date: string; max_score: number | null; submitted_at: string; class_label: string;
   subject_name: string; category: string | null; term_name: string; term_id: number;
+  kind?: "assessment" | "mid_term";
   marked: number; absent: number; average: number | null; average_percentage: number | null;
 }
 interface Data { teacher: { id: number; name: string; email: string; avatar: string | null }; assessments: Submitted[] }
@@ -50,12 +51,12 @@ export function TeacherAssessments() {
             <span>{data.teacher.name}</span>
           </span>
         ) : "Submitted assessments"}
-        subtitle={data ? `${data.assessments.length} submitted assessment${data.assessments.length === 1 ? "" : "s"} · ${data.teacher.email}` : undefined}
+        subtitle={data ? `${data.assessments.length} submission${data.assessments.length === 1 ? "" : "s"} · ${data.teacher.email}` : undefined}
       />
 
       {error ? <ErrorState message={error} onRetry={load} /> : !data ? <Loading /> : data.assessments.length === 0 ? (
         <EmptyState icon={<ClipboardList size={44} />} title="Nothing submitted yet">
-          Assessments appear here once the teacher submits them. Drafts stay private to the teacher.
+          Mid-term lessons appear here once the teacher submits them. Drafts stay with the teacher.
         </EmptyState>
       ) : (
         <>
@@ -97,12 +98,21 @@ export function TeacherAssessments() {
                 </thead>
                 <tbody>
                   {shown.map((a) => (
-                    <tr key={a.id} className="border-t cursor-pointer hover:bg-black/[0.02]" style={{ borderColor: "var(--border)" }}
-                      onClick={() => navigate(`/dean/academic-records/assessments/${a.id}`)}>
+                    <tr key={`${a.kind ?? "assessment"}-${a.id}`} className="border-t cursor-pointer hover:bg-black/[0.02]" style={{ borderColor: "var(--border)" }}
+                      onClick={() => {
+                        if (a.kind === "mid_term") navigate(`/dean/reports?term=${a.term_id}`);
+                        else navigate(`/dean/academic-records/assessments/${a.id}`);
+                      }}>
                       <td className="px-4 py-3">
-                        <div className="flex items-center gap-2"><CategoryBadge category={a.category} /></div>
+                        <div className="flex items-center gap-2">
+                          {a.kind === "mid_term"
+                            ? <span className="text-xs font-semibold px-2 py-0.5 rounded-full" style={{ backgroundColor: "color-mix(in srgb, var(--maroon) 12%, white)", color: "var(--maroon)" }}>Mid-term</span>
+                            : <CategoryBadge category={a.category} />}
+                        </div>
                         <div className="font-medium mt-1" style={{ color: "var(--dark-gray)" }}>{a.title}</div>
-                        <div className="text-xs" style={{ color: "var(--mid-gray)" }}>{formatDate(a.date)} · out of {a.max_score}</div>
+                        <div className="text-xs" style={{ color: "var(--mid-gray)" }}>
+                          {formatDate(a.date)}{a.max_score != null ? ` · out of ${a.max_score}` : ""}
+                        </div>
                       </td>
                       <td className="px-4 py-3" style={{ color: "var(--dark-gray)" }}>{a.subject_name}<div className="text-xs" style={{ color: "var(--mid-gray)" }}>{a.class_label}</div></td>
                       <td className="px-4 py-3 hidden md:table-cell" style={{ color: "var(--dark-gray)" }}>{a.term_name}</td>

@@ -157,6 +157,23 @@ export class RecordingDecisionDto {
   decision?: 'promu' | 'redoublement' | 'renvoye' | null;
 }
 
+export class SubmitMidtermDto {
+  @IsInt()
+  @Min(1)
+  @Max(RULES.ID_MAX)
+  class_id: number;
+
+  @IsInt()
+  @Min(1)
+  @Max(RULES.ID_MAX)
+  term_id: number;
+
+  @IsInt()
+  @Min(1)
+  @Max(RULES.ID_MAX)
+  subject_id: number;
+}
+
 export class SaveRecordingDto {
   @IsInt()
   @Min(1)

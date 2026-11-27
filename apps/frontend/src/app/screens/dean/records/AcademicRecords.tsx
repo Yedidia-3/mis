@@ -31,7 +31,7 @@ export function AcademicRecords() {
     <div className="space-y-6">
       <PageHeader
         title="Academic Records"
-        subtitle={data?.academic_year ? `Marks teachers have submitted in ${data.academic_year.name}, by section.` : "Marks teachers have submitted, by section."}
+        subtitle={data?.academic_year ? `Mid-term lessons teachers have submitted in ${data.academic_year.name}, by section.` : "Mid-term lessons teachers have submitted, by section."}
         actions={data?.academic_year && (
           <Button variant="outline" onClick={() => navigate("/dean/terms")}>
             <CalendarRange size={16} className="mr-1.5" /> Terms

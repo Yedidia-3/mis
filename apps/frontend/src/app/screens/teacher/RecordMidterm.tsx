@@ -1,4 +1,4 @@
-import { Loader2, Save } from "lucide-react";
+import { Loader2, RotateCcw, Save, Send } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { api } from "../../../lib/api";
@@ -9,7 +9,7 @@ import { Input } from "../../components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui/select";
 
 interface Student { id: number; name: string }
-interface Subject { id: number; code: string; name: string; max: number }
+interface Subject { id: number; code: string; name: string; max: number; submitted?: boolean }
 interface Term { id: number; name: string; status: string }
 interface Sheet {
   mode: "nursery" | "midterm";
@@ -19,6 +19,7 @@ interface Sheet {
   students: Student[];
   subjects?: Subject[];
   scores?: { student_id: number; subject_id: number; score: number }[];
+  submissions?: { subject_id: number; status: string; submitted_at: string }[];
 }
 interface Payload {
   current_term_id: number | null;
@@ -35,18 +36,34 @@ export function RecordMidterm({ classId, onClose }: { classId: string; onClose: 
   const [filter, setFilter] = useState<"all" | "blank" | "recorded">("all");
   const [search, setSearch] = useState("");
   const [saving, setSaving] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
-  const load = useCallback(async (nextTerm?: string) => {
+  const applySheet = (res: Payload, keepSubject?: string) => {
+    setData(res);
+    const term = (res.sheet?.term?.id ? String(res.sheet.term.id) : "")
+      || (res.current_term_id ? String(res.current_term_id) : res.terms[0] ? String(res.terms[0].id) : "");
+    setTermId(term);
+    const subjects = res.sheet?.mode === "midterm" ? res.sheet.subjects ?? [] : [];
+    const chosen = subjects.some((s) => String(s.id) === keepSubject) ? keepSubject!
+      : subjects[0] ? String(subjects[0].id) : "";
+    setSubjectId(chosen);
+    const picked = subjects.find((s) => String(s.id) === chosen);
+    const next: Record<number, string> = {};
+    if (picked) {
+      for (const row of res.sheet?.scores ?? []) {
+        if (row.subject_id === picked.id) next[row.student_id] = String(row.score);
+      }
+    }
+    setMarks(next);
+  };
+
+  const load = useCallback(async (nextTerm?: string, keepSubject?: string) => {
     setError(null);
     const q = new URLSearchParams({ class_id: classId });
     if (nextTerm) q.set("term_id", nextTerm);
     try {
       const res = await api.get<Payload>(`/api/v1/academics/assessments/recording-sheet?${q}`);
-      setData(res);
-      const term = nextTerm
-        || (res.sheet?.term?.id ? String(res.sheet.term.id) : "")
-        || (res.current_term_id ? String(res.current_term_id) : res.terms[0] ? String(res.terms[0].id) : "");
-      setTermId(term);
+      applySheet(res, keepSubject);
     } catch (e: any) {
       setError(e?.message ?? "Could not open the mid-term sheet");
     }
@@ -54,26 +71,10 @@ export function RecordMidterm({ classId, onClose }: { classId: string; onClose: 
 
   useEffect(() => { load(); }, [load]);
 
-  useEffect(() => {
-    const subjects = data?.sheet?.mode === "midterm" ? data.sheet.subjects ?? [] : [];
-    setSubjectId((current) => subjects.some((s) => String(s.id) === current) ? current : subjects[0] ? String(subjects[0].id) : "");
-  }, [data]);
-
-  useEffect(() => {
-    const current = data?.sheet?.mode === "midterm" ? data.sheet : null;
-    const picked = current?.subjects?.find((s) => String(s.id) === subjectId);
-    const next: Record<number, string> = {};
-    if (picked) {
-      for (const row of current?.scores ?? []) {
-        if (row.subject_id === picked.id) next[row.student_id] = String(row.score);
-      }
-    }
-    setMarks(next);
-  }, [data, subjectId]);
-
   const sheet = data?.sheet?.mode === "midterm" ? data.sheet : null;
   const subject = sheet?.subjects?.find((s) => String(s.id) === subjectId) ?? null;
-  const locked = !!sheet?.locked;
+  const submitted = !!subject?.submitted;
+  const locked = !!sheet?.locked || submitted;
 
   const rows = useMemo(() => {
     if (!sheet) return [];
@@ -96,8 +97,25 @@ export function RecordMidterm({ classId, onClose }: { classId: string; onClose: 
     return null;
   }, [sheet, subject, marks]);
 
+  const blankCount = useMemo(() => {
+    if (!sheet || !subject) return 0;
+    return sheet.students.filter((student) => !(marks[student.id] ?? "").trim()).length;
+  }, [sheet, subject, marks]);
+
+  const chooseSubject = (id: string) => {
+    setSubjectId(id);
+    const picked = sheet?.subjects?.find((s) => String(s.id) === id);
+    const next: Record<number, string> = {};
+    if (picked) {
+      for (const row of sheet?.scores ?? []) {
+        if (row.subject_id === picked.id) next[row.student_id] = String(row.score);
+      }
+    }
+    setMarks(next);
+  };
+
   const save = async () => {
-    if (!sheet || !subject || markError) return;
+    if (!sheet || !subject || markError || submitted) return;
     setSaving(true);
     try {
       const res = await api.put<Payload>("/api/v1/academics/assessments/recording-sheet", {
@@ -108,7 +126,7 @@ export function RecordMidterm({ classId, onClose }: { classId: string; onClose: 
           return { student_id: student.id, subject_id: subject.id, score: raw === "" ? null : Number(raw) };
         }),
       });
-      setData(res);
+      applySheet(res, String(subject.id));
       toast.success(`${subject.name} saved`);
     } catch (e: any) {
       toast.error(e?.message ?? "Could not save the marks");
@@ -117,7 +135,57 @@ export function RecordMidterm({ classId, onClose }: { classId: string; onClose: 
     }
   };
 
-  if (error) return <ErrorState message={error} onRetry={() => load(termId)} />;
+  const submit = async () => {
+    if (!sheet || !subject || markError || submitted || blankCount > 0) return;
+    setSubmitting(true);
+    try {
+      await saveQuiet();
+      const res = await api.post<Payload>("/api/v1/academics/assessments/recording-sheet/submit", {
+        class_id: Number(classId),
+        term_id: Number(termId),
+        subject_id: subject.id,
+      });
+      applySheet(res, String(subject.id));
+      toast.success(`${subject.name} submitted to the dean`);
+    } catch (e: any) {
+      toast.error(e?.message ?? "Could not submit to the dean");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const saveQuiet = async () => {
+    if (!sheet || !subject) return;
+    const res = await api.put<Payload>("/api/v1/academics/assessments/recording-sheet", {
+      class_id: Number(classId),
+      term_id: Number(termId),
+      scores: sheet.students.map((student) => {
+        const raw = (marks[student.id] ?? "").trim();
+        return { student_id: student.id, subject_id: subject.id, score: raw === "" ? null : Number(raw) };
+      }),
+    });
+    applySheet(res, String(subject.id));
+  };
+
+  const reopen = async () => {
+    if (!sheet || !subject || !submitted) return;
+    setSubmitting(true);
+    try {
+      const res = await api.post<Payload>("/api/v1/academics/assessments/recording-sheet/reopen", {
+        class_id: Number(classId),
+        term_id: Number(termId),
+        subject_id: subject.id,
+      });
+      applySheet(res, String(subject.id));
+      toast.success(`${subject.name} reopened for corrections`);
+    } catch (e: any) {
+      toast.error(e?.message ?? "Could not reopen the lesson");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  if (error) return <ErrorState message={error} onRetry={() => load(termId, subjectId)} />;
   if (!data) return <Loading />;
   if (data.sheet && data.sheet.mode !== "midterm") {
     return (
@@ -147,18 +215,20 @@ export function RecordMidterm({ classId, onClose }: { classId: string; onClose: 
         <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-2">
           <label className="text-sm" style={{ color: "var(--mid-gray)" }}>
             Lesson
-            <Select value={subjectId} onValueChange={setSubjectId}>
+            <Select value={subjectId} onValueChange={chooseSubject}>
               <SelectTrigger className="mt-1 bg-white" aria-label="Lesson"><SelectValue placeholder="Lesson" /></SelectTrigger>
               <SelectContent>
                 {sheet.subjects.map((item) => (
-                  <SelectItem key={item.id} value={String(item.id)}>{item.name} · out of {item.max}</SelectItem>
+                  <SelectItem key={item.id} value={String(item.id)}>
+                    {item.name} · out of {item.max}{item.submitted ? " · submitted" : ""}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
           </label>
           <label className="text-sm" style={{ color: "var(--mid-gray)" }}>
             Term
-            <Select value={termId} onValueChange={(v) => { setTermId(v); load(v); }}>
+            <Select value={termId} onValueChange={(v) => { setTermId(v); load(v, subjectId); }}>
               <SelectTrigger className="mt-1 bg-white" aria-label="Term"><SelectValue placeholder="Term" /></SelectTrigger>
               <SelectContent>
                 {data.terms.map((term) => (
@@ -170,22 +240,48 @@ export function RecordMidterm({ classId, onClose }: { classId: string; onClose: 
             </Select>
           </label>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Button variant="outline" onClick={onClose}>Back to class list</Button>
-          <Button onClick={save} disabled={locked || saving || !!markError}
-            style={{ backgroundColor: "var(--maroon)", color: "#fff" }}>
-            {saving ? <Loader2 size={16} className="mr-1.5 animate-spin" /> : <Save size={16} className="mr-1.5" />}
-            Save marks
-          </Button>
+          {!submitted ? (
+            <>
+              <Button onClick={save} disabled={locked || saving || submitting || !!markError}
+                style={{ backgroundColor: "var(--navy-blue)", color: "#fff" }}>
+                {saving ? <Loader2 size={16} className="mr-1.5 animate-spin" /> : <Save size={16} className="mr-1.5" />}
+                Save
+              </Button>
+              <Button onClick={submit}
+                disabled={locked || saving || submitting || !!markError || blankCount > 0}
+                style={{ backgroundColor: "var(--maroon)", color: "#fff" }}>
+                {submitting ? <Loader2 size={16} className="mr-1.5 animate-spin" /> : <Send size={16} className="mr-1.5" />}
+                Submit to dean
+              </Button>
+            </>
+          ) : (
+            <Button onClick={reopen} disabled={sheet.locked || submitting}
+              style={{ backgroundColor: "var(--maroon)", color: "#fff" }}>
+              {submitting ? <Loader2 size={16} className="mr-1.5 animate-spin" /> : <RotateCcw size={16} className="mr-1.5" />}
+              Reopen to correct
+            </Button>
+          )}
         </div>
       </div>
 
-      {locked && (
+      {submitted && (
+        <p className="text-sm rounded-xl border p-3" style={{ borderColor: "var(--border)", color: "var(--dark-gray)" }}>
+          {subject?.name} was submitted to the dean. Reopen it only if a mark needs correcting.
+        </p>
+      )}
+      {sheet.locked && !submitted && (
         <p className="text-sm rounded-xl border p-3" style={{ borderColor: "var(--border)", color: "var(--dark-gray)" }}>
           {sheet.term.name} is {sheet.term.status === "closed" ? "closed" : "not open"}, so these marks cannot be changed.
         </p>
       )}
       {markError && <p className="text-sm" style={{ color: "var(--danger-red)" }}>{markError}</p>}
+      {!submitted && blankCount > 0 && (
+        <p className="text-sm" style={{ color: "var(--mid-gray)" }}>
+          {blankCount} pupil{blankCount === 1 ? "" : "s"} still need a mark before you can submit.
+        </p>
+      )}
 
       <div className="flex flex-col sm:flex-row gap-2">
         <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search pupil" className="h-11" />
@@ -233,7 +329,7 @@ export function RecordMidterm({ classId, onClose }: { classId: string; onClose: 
         </table>
       </div>
       <p className="text-xs" style={{ color: "var(--mid-gray)" }}>
-        One mark for this lesson. The maximum comes from the mid-term sheet, so you only type the points.
+        Save while you work. Submit to dean when every pupil has a mark for this lesson.
       </p>
     </div>
   );

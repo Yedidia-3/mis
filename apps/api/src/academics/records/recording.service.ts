@@ -1,7 +1,8 @@
-import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, Logger } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { User } from '../../entities/user.entity';
+import { NotificationsService } from '../../notifications/notifications.service';
 import {
   BULLETIN_ORDER, BulletinCode, canonicalSubject, midtermCopy, NURSERY_AREAS, NURSERY_CODES,
   NURSERY_DECISIONS, NURSERY_RATINGS, NurseryDecision, NurseryRating, primaryYear,
@@ -27,9 +28,15 @@ export interface SaveRecordingInput {
 
 @Injectable()
 export class RecordingService {
-  constructor(@InjectDataSource() private db: DataSource) {}
+  private readonly logger = new Logger(RecordingService.name);
+
+  constructor(
+    @InjectDataSource() private db: DataSource,
+    private notifications: NotificationsService,
+  ) {}
 
   async sheet(user: User, classId?: number, termId?: number) {
+    await this.ensureSubmissionTable();
     const year = await this.activeYear();
     if (!year) return { academic_year: null, current_term_id: null, classes: [], terms: [], sheet: null };
 
@@ -89,10 +96,18 @@ export class RecordingService {
         const allowed = new Map<number, number>(
           sheet.subjects.map((s: { id: number; max: number }) => [s.id, Number(s.max)]),
         );
+        const submitted = new Set(
+          ((sheet as any).submissions ?? [])
+            .filter((row: any) => row.status === 'submitted')
+            .map((row: any) => Number(row.subject_id)),
+        );
         for (const entry of dto.scores ?? []) {
           onRoster(entry.student_id);
           const max = allowed.get(entry.subject_id);
           if (max === undefined) throw new ForbiddenException('That subject is not yours to record in this class');
+          if (submitted.has(entry.subject_id)) {
+            throw new BadRequestException('Those marks were submitted to the dean. Reopen the lesson before changing them.');
+          }
           if (entry.score === null || entry.score === undefined) {
             await manager.query(
               `DELETE FROM midterm_scores WHERE term_id = $1 AND student_id = $2 AND subject_id = $3`,
@@ -119,19 +134,18 @@ export class RecordingService {
           if (!NURSERY_CODES.includes(entry.subject_code)) {
             throw new BadRequestException('That activity is not on the nursery bulletin');
           }
-          if (entry.rating && !NURSERY_RATINGS.includes(entry.rating)) {
-            throw new BadRequestException('Choose Excellent, Très bon, Bon or Assez bon');
-          }
-          if (!entry.rating) {
+          if (entry.rating === null || entry.rating === undefined) {
             await manager.query(
               `DELETE FROM nursery_ratings WHERE term_id = $1 AND student_id = $2 AND subject_code = $3`,
               [term.id, entry.student_id, entry.subject_code],
             );
             continue;
           }
+          if (!NURSERY_RATINGS.includes(entry.rating)) {
+            throw new BadRequestException('Choose one of the four colours on the bulletin');
+          }
           await manager.query(
-            `INSERT INTO nursery_ratings
-               (class_id, term_id, student_id, subject_code, rating, updated_by, updated_at)
+            `INSERT INTO nursery_ratings (class_id, term_id, student_id, subject_code, rating, updated_by, updated_at)
              VALUES ($1, $2, $3, $4, $5, $6, now())
              ON CONFLICT (term_id, student_id, subject_code)
              DO UPDATE SET rating = EXCLUDED.rating, class_id = EXCLUDED.class_id,
@@ -141,7 +155,7 @@ export class RecordingService {
         }
         for (const entry of dto.observations ?? []) {
           onRoster(entry.student_id);
-          const text = (entry.observation ?? '').replace(/\s+/g, ' ').trim();
+          const text = (entry.observation ?? '').trim();
           if (!text) {
             await manager.query(
               `DELETE FROM nursery_observations WHERE term_id = $1 AND student_id = $2`,
@@ -183,6 +197,105 @@ export class RecordingService {
     });
 
     return this.sheet(user, dto.class_id, dto.term_id);
+  }
+
+  /** Submit one mid-term lesson sheet to the dean. Every pupil must have a mark. */
+  async submitMidterm(user: User, classId: number, termId: number, subjectId: number) {
+    await this.ensureSubmissionTable();
+    const loaded = await this.sheet(user, classId, termId);
+    const sheet = loaded.sheet;
+    if (!sheet || sheet.mode !== 'midterm') {
+      throw new BadRequestException('Choose a primary class for the mid-term');
+    }
+    if (sheet.term.status !== 'active') {
+      throw new BadRequestException(`${sheet.term.name} is not open for submission`);
+    }
+    const subject = sheet.subjects.find((s: any) => s.id === subjectId);
+    if (!subject) throw new ForbiddenException('That lesson is not yours to submit in this class');
+
+    const existing = ((sheet as any).submissions ?? []).find((row: any) => Number(row.subject_id) === subjectId);
+    if (existing?.status === 'submitted') {
+      throw new BadRequestException('This lesson was already submitted to the dean');
+    }
+
+    const scores = new Map(
+      (sheet.scores ?? [])
+        .filter((row: any) => row.subject_id === subjectId)
+        .map((row: any) => [row.student_id, row.score]),
+    );
+    const missing = sheet.students.filter((student: any) => !scores.has(student.id));
+    if (missing.length) {
+      const names = missing.slice(0, 5).map((s: any) => s.name).join(', ');
+      throw new BadRequestException(
+        `${missing.length} pupil${missing.length === 1 ? ' has' : 's have'} no mark yet (${names}${missing.length > 5 ? ', …' : ''}). Enter every mark before submitting.`,
+      );
+    }
+
+    await this.db.query(
+      `INSERT INTO midterm_submissions (class_id, subject_id, term_id, submitted_by, submitted_at)
+       VALUES ($1, $2, $3, $4, now())
+       ON CONFLICT (class_id, subject_id, term_id)
+       DO UPDATE SET submitted_by = EXCLUDED.submitted_by, submitted_at = now()`,
+      [classId, subjectId, termId, user.id],
+    );
+
+    await this.notifyDean(user, sheet.label, subject.name, sheet.term.name, 'submitted');
+    return this.sheet(user, classId, termId);
+  }
+
+  /** Return a submitted lesson to draft so the teacher can correct marks. */
+  async reopenMidterm(user: User, classId: number, termId: number, subjectId: number) {
+    await this.ensureSubmissionTable();
+    const loaded = await this.sheet(user, classId, termId);
+    const sheet = loaded.sheet;
+    if (!sheet || sheet.mode !== 'midterm') {
+      throw new BadRequestException('Choose a primary class for the mid-term');
+    }
+    if (sheet.term.status !== 'active') {
+      throw new BadRequestException(`${sheet.term.name} is not open`);
+    }
+    const subject = sheet.subjects.find((s: any) => s.id === subjectId);
+    if (!subject) throw new ForbiddenException('That lesson is not yours in this class');
+
+    const result = await this.db.query(
+      `DELETE FROM midterm_submissions
+       WHERE class_id = $1 AND subject_id = $2 AND term_id = $3
+       RETURNING id`,
+      [classId, subjectId, termId],
+    );
+    if (!result.length) {
+      throw new BadRequestException('Only a submitted lesson can be reopened');
+    }
+
+    await this.notifyDean(user, sheet.label, subject.name, sheet.term.name, 'reopened');
+    return this.sheet(user, classId, termId);
+  }
+
+  private async notifyDean(
+    teacher: User,
+    classLabel: string,
+    subjectName: string,
+    termName: string,
+    action: 'submitted' | 'reopened',
+  ) {
+    const named = await this.db.query(`SELECT name FROM users WHERE id = $1`, [teacher.id]);
+    const teacherName = named[0]?.name ?? teacher.email ?? 'A teacher';
+    const message = action === 'submitted'
+      ? `${teacherName} submitted mid-term ${subjectName} for ${classLabel} (${termName}).`
+      : `${teacherName} reopened mid-term ${subjectName} for ${classLabel} (${termName}) to correct the marks.`;
+    try {
+      await this.notifications.notifyRoles(
+        ['dean'],
+        message,
+        action === 'submitted' ? 'info' : 'warning',
+        '/dean/academic-records',
+      );
+    } catch (error) {
+      this.logger.error(
+        `Mid-term ${action} for ${classLabel} ${subjectName}, but the dean could not be notified`,
+        error instanceof Error ? error.stack : String(error),
+      );
+    }
   }
 
   private async classesFor(user: User, yearId: number) {
@@ -257,6 +370,15 @@ export class RecordingService {
           [cls.id, term.id, mine.map((s) => s.id)],
         )
       : [];
+    const submissions: any[] = mine.length
+      ? await this.db.query(
+          `SELECT subject_id, submitted_at, submitted_by
+           FROM midterm_submissions
+           WHERE class_id = $1 AND term_id = $2 AND subject_id = ANY($3)`,
+          [cls.id, term.id, mine.map((s) => s.id)],
+        )
+      : [];
+    const submittedIds = new Set(submissions.map((row) => Number(row.subject_id)));
 
     return {
       mode: 'midterm' as const,
@@ -270,8 +392,15 @@ export class RecordingService {
         code: s.canon,
         name: copy.subjects.find((x) => x.code === s.canon)?.name ?? s.canon,
         max: Number(copy.subjects.find((x) => x.code === s.canon)?.max ?? s.max),
+        submitted: submittedIds.has(s.id),
       })),
       scores: scores.map((r) => ({ student_id: r.student_id, subject_id: r.subject_id, score: Number(r.score) })),
+      submissions: submissions.map((row) => ({
+        subject_id: Number(row.subject_id),
+        status: 'submitted' as const,
+        submitted_at: row.submitted_at,
+        submitted_by: row.submitted_by,
+      })),
     };
   }
 
@@ -311,6 +440,20 @@ export class RecordingService {
       observations,
       decisions,
     };
+  }
+
+  private async ensureSubmissionTable() {
+    await this.db.query(`
+      CREATE TABLE IF NOT EXISTS midterm_submissions (
+        id SERIAL PRIMARY KEY,
+        class_id integer NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
+        subject_id integer NOT NULL REFERENCES subjects(id) ON DELETE CASCADE,
+        term_id integer NOT NULL REFERENCES terms(id) ON DELETE CASCADE,
+        submitted_by integer REFERENCES users(id) ON DELETE SET NULL,
+        submitted_at TIMESTAMP NOT NULL DEFAULT now(),
+        CONSTRAINT uq_midterm_submissions UNIQUE (class_id, subject_id, term_id)
+      )
+    `);
   }
 
   private async activeYear(): Promise<{ id: number; name: string } | null> {

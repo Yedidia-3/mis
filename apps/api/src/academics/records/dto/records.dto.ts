@@ -18,6 +18,19 @@ export class BandQueryDto {
   band?: SchoolBand;
 }
 
+/** Class list may omit the term so the page can load the year's terms first. */
+export class ReportListQueryDto {
+  @IsIn(['mid_term', 'nursery'], KIND_MESSAGE)
+  kind: ReportKind;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt(TERM_MESSAGE)
+  @Min(1, TERM_MESSAGE)
+  @Max(RULES.ID_MAX, TERM_MESSAGE)
+  term_id?: number;
+}
+
 /** Nursery has no term. Mid-term is one term. End of term and end of year are not printed here. */
 export class ReportQueryDto {
   @IsIn(['mid_term', 'nursery'], KIND_MESSAGE)

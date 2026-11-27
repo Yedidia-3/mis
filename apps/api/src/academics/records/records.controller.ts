@@ -4,7 +4,9 @@ import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/guards/roles.guard';
 import { Roles } from '../../auth/roles.decorator';
 import { User } from '../../entities/user.entity';
-import { BandQueryDto, GenerateReportsDto, ReportQueryDto, SaveSubjectReportSettingsDto } from './dto/records.dto';
+import {
+  BandQueryDto, GenerateReportsDto, ReportListQueryDto, ReportQueryDto, SaveSubjectReportSettingsDto,
+} from './dto/records.dto';
 import { RecordsService } from './records.service';
 import { ReportsService } from './reports.service';
 import { SchoolBand } from './school-band';
@@ -38,7 +40,7 @@ export class ReportsController {
   constructor(private reports: ReportsService) {}
 
   @Get('classes')
-  classes(@Query() query: ReportQueryDto) {
+  classes(@Query() query: ReportListQueryDto) {
     return this.reports.listClasses(query.kind, query.term_id);
   }
 

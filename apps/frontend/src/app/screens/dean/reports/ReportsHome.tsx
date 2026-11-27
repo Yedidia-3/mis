@@ -25,18 +25,20 @@ export function ReportsHome() {
   const load = useCallback(async () => {
     setError(null);
     try {
-      const q = new URLSearchParams({ kind: "mid_term" });
-      if (termId) q.set("term_id", termId);
-      const [midRes, nurseryRes] = await Promise.all([
-        api.get<Data>(`/api/v1/academics/reports/classes?${q}`),
-        api.get<Data>(`/api/v1/academics/reports/classes?kind=nursery`),
-      ]);
-      setMid(midRes);
+      // Nursery loads without a term, and also returns the year's terms, so the
+      // mid-term list can pick the current term before asking for classes.
+      const nurseryRes = await api.get<Data>(`/api/v1/academics/reports/classes?kind=nursery`);
       setNursery(nurseryRes);
-      if (!termId && midRes.terms.length) {
-        const pick = midRes.terms.find((t) => t.status === "active") ?? midRes.terms[midRes.terms.length - 1];
-        setParams({ term: String(pick.id) }, { replace: true });
+      let chosen = termId;
+      if (!chosen && nurseryRes.terms.length) {
+        const pick = nurseryRes.terms.find((t) => t.status === "active") ?? nurseryRes.terms[nurseryRes.terms.length - 1];
+        chosen = String(pick.id);
+        setParams({ term: chosen }, { replace: true });
       }
+      const q = new URLSearchParams({ kind: "mid_term" });
+      if (chosen) q.set("term_id", chosen);
+      const midRes = await api.get<Data>(`/api/v1/academics/reports/classes?${q}`);
+      setMid(midRes);
     } catch (e: any) {
       setError(e?.message ?? "Could not load classes");
     }

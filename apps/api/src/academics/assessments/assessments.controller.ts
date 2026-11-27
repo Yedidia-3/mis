@@ -13,7 +13,9 @@ import {
   CreateCatalogueEntryDto, UpdateCatalogueEntryDto, AssignPLevelDto, CloseTermDto,
   TermsOverviewQueryDto,
 } from './dto/config.dto';
-import { CreateAssessmentDto, SaveRecordingDto, SaveScoresDto, UpdateAssessmentDto } from './dto/assessment.dto';
+import {
+  CreateAssessmentDto, SaveRecordingDto, SaveScoresDto, SubmitMidtermDto, UpdateAssessmentDto,
+} from './dto/assessment.dto';
 import { RecordingService } from '../records/recording.service';
 
 // Literal segments are declared before ':id' so that /assessments/terms is not
@@ -181,6 +183,18 @@ export class AssessmentsController {
   @Roles('teacher', 'dean', 'principal', 'super_admin')
   saveRecording(@Body() dto: SaveRecordingDto, @CurrentUser() user: User) {
     return this.recording.save(user, dto);
+  }
+
+  @Post('recording-sheet/submit')
+  @Roles('teacher')
+  submitMidterm(@Body() dto: SubmitMidtermDto, @CurrentUser() user: User) {
+    return this.recording.submitMidterm(user, dto.class_id, dto.term_id, dto.subject_id);
+  }
+
+  @Post('recording-sheet/reopen')
+  @Roles('teacher')
+  reopenMidterm(@Body() dto: SubmitMidtermDto, @CurrentUser() user: User) {
+    return this.recording.reopenMidterm(user, dto.class_id, dto.term_id, dto.subject_id);
   }
 
   // ─── Supervisors' oversight list ─────────────────────────────────────────────
