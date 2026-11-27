@@ -173,40 +173,42 @@ export class RecordsService {
       )
     `);
     const rows: any[] = await this.db.query(
-      `SELECT a.id, a.title, a.date::text AS date, a.max_score, a.submitted_at, a.class_id,
-              c.name AS class_name, pl.name AS p_level_name,
-              s.name AS subject_name, ty.category, t.name AS term_name, t.id AS term_id,
-              'assessment'::text AS kind,
-              (SELECT COUNT(*)::int FROM assessment_scores sc
-                 WHERE sc.assessment_id = a.id AND sc.score IS NOT NULL) AS marked,
-              (SELECT COUNT(*)::int FROM assessment_scores sc
-                 WHERE sc.assessment_id = a.id AND sc.is_absent) AS absent,
-              (SELECT AVG(sc.score) FROM assessment_scores sc
-                 WHERE sc.assessment_id = a.id AND sc.score IS NOT NULL) AS average
-       FROM assessments a
-       JOIN classes c   ON c.id = a.class_id
-       JOIN p_levels pl ON pl.id = c.p_level_id
-       JOIN subjects s  ON s.id = a.subject_id
-       JOIN assessment_types ty ON ty.id = a.assessment_type_id
-       JOIN terms t     ON t.id = a.term_id
-       WHERE a.status = 'submitted' AND a.created_by = $1 AND a.class_id = ANY($2)
-       UNION ALL
-       SELECT ms.id, 'Mid-term'::text AS title, ms.submitted_at::date::text AS date,
-              NULL::numeric AS max_score, ms.submitted_at, ms.class_id,
-              c.name AS class_name, pl.name AS p_level_name,
-              s.name AS subject_name, 'mid_term'::text AS category, t.name AS term_name, t.id AS term_id,
-              'mid_term'::text AS kind,
-              (SELECT COUNT(*)::int FROM midterm_scores sc
-                 WHERE sc.class_id = ms.class_id AND sc.subject_id = ms.subject_id AND sc.term_id = ms.term_id) AS marked,
-              0 AS absent,
-              (SELECT AVG(sc.score) FROM midterm_scores sc
-                 WHERE sc.class_id = ms.class_id AND sc.subject_id = ms.subject_id AND sc.term_id = ms.term_id) AS average
-       FROM midterm_submissions ms
-       JOIN classes c   ON c.id = ms.class_id
-       JOIN p_levels pl ON pl.id = c.p_level_id
-       JOIN subjects s  ON s.id = ms.subject_id
-       JOIN terms t     ON t.id = ms.term_id
-       WHERE ms.submitted_by = $1 AND ms.class_id = ANY($2)
+      `SELECT * FROM (
+         SELECT a.id, a.title, a.date::text AS date, a.max_score::numeric AS max_score, a.submitted_at, a.class_id,
+                c.name AS class_name, pl.name AS p_level_name,
+                s.name AS subject_name, ty.category::text AS category, t.name AS term_name, t.id AS term_id,
+                'assessment'::text AS kind,
+                (SELECT COUNT(*)::int FROM assessment_scores sc
+                   WHERE sc.assessment_id = a.id AND sc.score IS NOT NULL) AS marked,
+                (SELECT COUNT(*)::int FROM assessment_scores sc
+                   WHERE sc.assessment_id = a.id AND sc.is_absent) AS absent,
+                (SELECT AVG(sc.score)::numeric FROM assessment_scores sc
+                   WHERE sc.assessment_id = a.id AND sc.score IS NOT NULL) AS average
+         FROM assessments a
+         JOIN classes c   ON c.id = a.class_id
+         JOIN p_levels pl ON pl.id = c.p_level_id
+         JOIN subjects s  ON s.id = a.subject_id
+         JOIN assessment_types ty ON ty.id = a.assessment_type_id
+         JOIN terms t     ON t.id = a.term_id
+         WHERE a.status = 'submitted' AND a.created_by = $1 AND a.class_id = ANY($2)
+         UNION ALL
+         SELECT ms.id, 'Mid-term'::text AS title, ms.submitted_at::date::text AS date,
+                NULL::numeric AS max_score, ms.submitted_at, ms.class_id,
+                c.name AS class_name, pl.name AS p_level_name,
+                s.name AS subject_name, 'mid_term'::text AS category, t.name AS term_name, t.id AS term_id,
+                'mid_term'::text AS kind,
+                (SELECT COUNT(*)::int FROM midterm_scores sc
+                   WHERE sc.class_id = ms.class_id AND sc.subject_id = ms.subject_id AND sc.term_id = ms.term_id) AS marked,
+                0::int AS absent,
+                (SELECT AVG(sc.score)::numeric FROM midterm_scores sc
+                   WHERE sc.class_id = ms.class_id AND sc.subject_id = ms.subject_id AND sc.term_id = ms.term_id) AS average
+         FROM midterm_submissions ms
+         JOIN classes c   ON c.id = ms.class_id
+         JOIN p_levels pl ON pl.id = c.p_level_id
+         JOIN subjects s  ON s.id = ms.subject_id
+         JOIN terms t     ON t.id = ms.term_id
+         WHERE ms.submitted_by = $1 AND ms.class_id = ANY($2)
+       ) submitted
        ORDER BY submitted_at DESC NULLS LAST, id DESC`,
       [teacherId, classIds],
     );
